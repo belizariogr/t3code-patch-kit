@@ -1,59 +1,84 @@
-# Patch local do T3 Code para macOS
+# Patch local do T3 Code para macOS e Linux
 
-Este kit reúne **Changes scope** (branch, alterações não commitadas ou conversa) e **desativação da criação de PRs**, com configurações globais e por projeto e as correções das ações de PR em notificações.
+Este kit mantém **Changes scope** (`branch`, `uncommitted` ou `thread`) e **controle da criação de PRs**, com preferências globais e por projeto. Conversation usa o diff líquido dos checkpoints; desabilitar criação de PRs mantém commit, push e acesso a PRs existentes. As ações assíncronas consultam a preferência atual.
 
-O script pronto atende especificamente ao **T3 Code (Beta) 0.1.0-disable-pr-creation.20261016, Apple Silicon**, instalado em `/Applications/T3 Code (Beta).app`. A identificação também usa SHA-256 do `app.asar`, não apenas o número da versão. Essa instalação já tinha as primeiras versões dos recursos; o payload inclui a versão consolidada com as correções posteriores de PRs.
+O mesmo `./apply.sh` detecta o sistema operacional e escolhe o perfil. Cada perfil verifica arquitetura, versão, commit e SHA-256; o número da versão sozinho não autoriza aplicação.
 
-## Aplicar agora
+| Sistema | Instalação padrão | Versão / commit | Payload |
+| --- | --- | --- | --- |
+| macOS arm64 | `/Applications/T3 Code (Beta).app` | `0.1.0-disable-pr-creation.20261016` / `66c4f1b87b99` | `target.json`, `payload.tar.gz`: somente cliente web |
+| Linux x64 | `/usr/lib/t3code` | `0.1.0` / `81493efb71e8` | `linux/target.json`, `linux/payload.tar.gz`: cliente web e servidor |
 
-Feche o T3 Code e execute **em um Terminal externo**:
+O perfil macOS original foi preservado. O perfil Linux foi compilado sobre o commit exato instalado, pois essa release oficial ainda não contém os contratos das duas preferências. O executável Electron e suas dependências nativas permanecem os da instalação.
+
+## Aplicar
+
+Pré-requisito: Node 24+ e `@electron/asar`. Se as dependências não estiverem disponíveis no kit ou no checkout irmão `../t3code`, execute `npm ci --ignore-scripts`. Use um runtime já disponível; não precisa mudar o Node global.
+
+Primeiro, confira a compatibilidade sem fechar ou alterar o aplicativo:
+
+```sh
+./apply.sh --check
+```
+
+Feche o T3 Code e execute **em um Terminal externo**. No macOS:
 
 ```sh
 cd /Users/belizario/dev/t3code-patch-kit
 ./apply.sh
 ```
 
-O payload já está compilado. O script prepara e assina uma cópia, verifica sua integridade, cria um backup completo em `backups/` e só então troca o aplicativo. Execute o mesmo comando novamente sem efeitos adicionais. As preferências existentes são mantidas; o patch não escolhe um novo Changes scope nem desativa PRs automaticamente.
-
-Para verificar sem alterar o aplicativo:
+No Linux desta máquina, `/usr/lib/t3code` pertence a root:
 
 ```sh
-./apply.sh --check
+cd /home/belizario/dev/t3code-patch-kit
+sudo env "PATH=$PATH" ./apply.sh
 ```
 
-Para desfazer, feche o aplicativo e execute:
+O `PATH` mantém disponível o Node instalado pelo usuário quando o `sudo` não encontra `node`. O script recusa substituir ou restaurar um aplicativo com processos daquele diretório ativos. Ele não encerra processos.
+
+O payload está compilado: a aplicação não instala dependências nem inicia servidor. O script prepara e verifica uma cópia, cria backup completo em `backups/`, confere novamente a origem e troca o diretório, com rollback se a troca falhar. Repetir o comando reconhece o patch e não cria outro backup. Mantenha o backup até confirmar o funcionamento.
+
+As preferências atuais são preservadas. O patch disponibiliza os controles em Settings, inclusive por projeto; ele não escolhe um novo Changes scope nem desativa PRs automaticamente. A preferência limita os caminhos de criação da interface, sem impedir ferramentas próprias dos agentes ou a CLI do GitHub.
+
+Para desfazer, feche o aplicativo e execute `./apply.sh --restore`; no Linux protegido, use `sudo env "PATH=$PATH" ./apply.sh --restore`.
+
+## Testar em uma cópia
+
+Não precisa fechar o aplicativo para preparar uma cópia:
 
 ```sh
-./apply.sh --restore
-```
+# Linux
+./apply.sh --output /tmp/t3code-patched
+./apply.sh --app /tmp/t3code-patched --check
 
-Para gerar apenas uma cópia de teste, sem fechar ou substituir o aplicativo instalado:
-
-```sh
+# macOS
 ./apply.sh --output '/tmp/T3 Code (Patch Test).app'
 ```
 
-O destino de teste precisa estar livre. `--app '/outro/caminho/T3.app'` permite operar outra cópia da **mesma instalação**. `--repo /caminho/t3code` permite mudar a localização do checkout que fornece `@electron/asar`; por padrão ele é o diretório irmão `../t3code`. As dependências já estão instaladas nesta máquina. Se levar o kit para outra pasta sem o checkout, execute `npm install --ignore-scripts` no kit usando Node 24+. O lançador usa `node` e, se ele for anterior ao Node 24, usa o runtime Node do próprio Electron.
+O destino precisa estar livre e fora da instalação de origem. `--output` não substitui a instalação nem cria backup para restauração; descarte essa cópia quando terminar. `--app` seleciona outra instalação do mesmo perfil, e `--repo` seleciona o checkout que fornece `@electron/asar` quando ele não está no kit. Nenhum desses parâmetros permite ignorar um hash incompatível.
 
-## Depois de atualizar o T3 Code
+No Linux são conferidos também hashes, links e permissões dos arquivos externos ao ASAR, inclusive `chrome-sandbox` e dependências unpacked. O perfil atual mantém o Electron intacto e não exige assinatura Apple. No macOS o fluxo continua atualizando a integridade no `Info.plist` e verificando a assinatura ad hoc.
 
-O script atual recusará um `app.asar` diferente. Entregue esta pasta ao próximo LLM com este pedido:
+## Próxima atualização oficial
 
-> Leia AGENTS.md deste kit. Adapte o patch de Changes scope e desativação de criação de PRs à versão do T3 Code atualmente instalada. Preserve as atualizações oficiais. Use os patches e arquivos de referência, prepare o código da versão exata, atualize o payload e o script, e teste aplicação, repetição e restauração numa cópia isolada. Não encerre o T3 Code em uso nem altere ~/.t3/userdata.
+O script recusará uma instalação diferente, mesmo que a versão continue `0.1.0`. Não troque apenas hashes ou números de versão. Entregue esta pasta ao próximo LLM com este pedido:
 
-O [AGENTS.md](AGENTS.md) traz o procedimento, os comandos de reconstrução e os limites do patch atual. Não basta atualizar o número da versão ou trocar os hashes.
+> Leia AGENTS.md e VALIDATION.md deste kit e o AGENTS.md da release do T3 Code. Adapte Changes scope e controle da criação de PRs ao executável instalado, identificando sistema, arquitetura, versão e commit pelo ASAR. Mantenha funcionando o outro perfil macOS/Linux, seus payloads e fingerprints. Prepare um worktree do commit exato, porte somente a intenção dos patches e preserve as mudanças oficiais e a configuração pública de produção. Confira se é necessário reconstruir o servidor. Atualize o perfil correspondente, patch de fonte, snapshots, checksums, README, AGENTS.md e VALIDATION.md. Teste aplicação, repetição e restauração numa cópia, rejeição de outra release e CLI --version. Não encerre o T3 Code em uso, não abra a UI e não altere dados de usuário. Entregue o comando para um Terminal externo.
+
+O procedimento completo, inclusive reconstrução dos dois perfis, está em [AGENTS.md](AGENTS.md). Os testes realmente executados e suas limitações estão em [VALIDATION.md](VALIDATION.md).
 
 ## Conteúdo
 
-- `apply.sh`, `apply.mjs`, `patch-lib.mjs`: patch pronto, backup, detecção de repetição e restauração.
-- `payload.tar.gz`, `target.json`: arquivos compilados que mudam e a identificação exata da instalação compatível.
-- `patches/`: diferenças no código-fonte das duas funcionalidades, incluindo um perfil para a versão instalada e outro para a base mais recente do fork.
-- `reference-installed-version/`: arquivos completos usados para compilar o payload atual, incluindo testes.
-- `reference/`: arquivos completos após o merge no `main` atualizado.
-- `prepare-source.mjs`: cria um worktree no commit da instalação e aplica o perfil de patches adequado; mantém conflitos para o LLM resolver.
-- `build-payload.mjs`: regenera o payload web a partir de um build revisado; não instala nada.
-- `manifest.json`, `VALIDATION.md`, `patch-lib.test.mjs`: proveniência, checksums, verificações realizadas e testes do empacotamento.
+- `apply.sh`: detecção do sistema; `apply.mjs`: instalador macOS; `apply-linux.mjs`: instalador Linux.
+- `patch-lib.mjs`, `linux-lib.mjs`: empacotamento, validação, permissões e detecção de processos.
+- `target.json`, `payload.tar.gz`: perfil macOS original; `linux/`: perfil Linux independente.
+- `prepare-source.mjs`: worktree isolado com perfil `legacy`, `modern` ou `linux`.
+- `build-linux.mjs`: recupera os defaults públicos da release Linux e compila web/servidor sem imprimir seus valores.
+- `build-payload.mjs`: gera o perfil da plataforma selecionada pelo caminho de `--app`; não instala o aplicativo.
+- `patches/`, `reference/`, `reference-installed-version/`, `reference-linux/`: deltas e snapshots de proveniência, nunca substitutos integrais dos arquivos de releases futuras.
+- `manifest.json`, `checksums.sha256`: bases e checksums; `patch-lib.test.mjs`, `linux.test.mjs`: testes do kit.
 
-O kit não contém credenciais, banco de dados nem cópia do aplicativo completo. O patch altera os arquivos web dentro do `app.asar`, atualiza seu hash no `Info.plist` e aplica assinatura ad hoc local. A assinatura de publicação da Apple não pode ser preservada após modificar um aplicativo; para esta versão de teste, a instalação original já tinha assinatura ad hoc.
+O patch cobre o cliente web servido pelo desktop e, no Linux atual, o servidor local desse desktop. Não atualiza `app.t3.codes`, outros servidores ou apps nativos iOS/Android. Os ajustes mobile de fonte foram preservados para integração, sem entregar um build mobile.
 
-As cópias de código e os patches derivam do [T3 Code](https://github.com/pingdotgg/t3code), distribuído sob a [licença MIT](LICENSE). Backups locais e dependências ficam fora do versionamento.
+O kit não contém banco de dados, credenciais privadas ou cópia completa do aplicativo. Deriva do [T3 Code](https://github.com/pingdotgg/t3code), distribuído sob a [licença MIT](LICENSE). Backups e dependências ficam fora do versionamento.

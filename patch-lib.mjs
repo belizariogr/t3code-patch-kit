@@ -12,7 +12,7 @@ export async function hashFile(file) {
 }
 
 export async function loadAsar(repo) {
-  for (const require of [createRequire(import.meta.url), createRequire(path.join(repo, 'scripts/package.json'))]) {
+  for (const require of [createRequire(import.meta.url), createRequire(path.resolve(repo, 'scripts/package.json'))]) {
     try { return await import(pathToFileURL(require.resolve('@electron/asar')).href); } catch (error) {
       if (error.code !== 'MODULE_NOT_FOUND' && error.code !== 'ERR_MODULE_NOT_FOUND') throw error;
     }
@@ -28,8 +28,9 @@ export function classifyArchive(actualHash, target, marker) {
   throw new Error('A instalação mudou. Este patch é exclusivo da versão registrada em target.json. Leia AGENTS.md para adaptar o kit; o aplicativo não foi alterado.');
 }
 
-export function payloadPath(root, relative) {
-  if (!relative.startsWith('apps/server/dist/client/') || relative.includes('\\') || relative.split('/').includes('..')) {
+export function payloadPath(root, relative, target = {}) {
+  const serverFile = /^apps\/server\/dist\/[\w.-]+\.mjs$/.test(relative) && target.serverFiles?.includes(relative);
+  if ((!relative.startsWith('apps/server/dist/client/') && !serverFile) || relative.includes('\\') || relative.split('/').includes('..')) {
     throw new Error(`Caminho de payload inválido: ${relative}`);
   }
   return path.join(root, relative);
@@ -57,12 +58,12 @@ export async function repackArchive(asar, original, destination, extractedRoot, 
   collect(asar.getRawHeader(original).header);
   asar.extractAll(original, extractedRoot);
   for (const relative of target.removedFiles) {
-    await fs.rm(payloadPath(extractedRoot, relative), { force: true });
+    await fs.rm(payloadPath(extractedRoot, relative, target), { force: true });
   }
   for (const [relative, digest] of Object.entries(target.changedFiles)) {
-    const source = payloadPath(payloadRoot, relative);
+    const source = payloadPath(payloadRoot, relative, target);
     if (await hashFile(source) !== digest) throw new Error(`Payload corrompido: ${relative}`);
-    const dest = payloadPath(extractedRoot, relative);
+    const dest = payloadPath(extractedRoot, relative, target);
     await fs.mkdir(path.dirname(dest), { recursive: true });
     await fs.copyFile(source, dest);
   }

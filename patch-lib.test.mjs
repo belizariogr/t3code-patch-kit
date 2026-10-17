@@ -3,10 +3,27 @@ import * as fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { classifyArchive, hashFile, loadAsar, payloadPath, repackArchive } from './patch-lib.mjs';
 
-const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../t3code');
+const kit = path.dirname(fileURLToPath(import.meta.url));
+const repo = path.resolve(kit, '../t3code');
+
+test('the same launcher selects macOS or Linux and forwards options', async () => {
+  const temp = await fs.mkdtemp(path.join(os.tmpdir(), 't3code-dispatch-test-'));
+  try {
+    await fs.writeFile(path.join(temp, 'uname'), '#!/bin/sh\nprintf "%s\\n" "$T3CODE_TEST_SYSTEM"\n', { mode: 0o755 });
+    await fs.writeFile(path.join(temp, 'node'), '#!/bin/sh\nprintf "%s\\n" "$@"\n', { mode: 0o755 });
+    for (const [system, helper] of [['Darwin', 'apply.mjs'], ['Linux', 'apply-linux.mjs']]) {
+      const r = spawnSync(path.join(kit, 'apply.sh'), ['--check', '--app', '/path with spaces/app'], { encoding: 'utf8', env: { ...process.env, PATH: `${temp}:${process.env.PATH}`, T3CODE_TEST_SYSTEM: system } });
+      assert.equal(r.status, 0, r.stderr);
+      assert.deepEqual(r.stdout.trim().split('\n'), [path.join(kit, helper), '--check', '--app', '/path with spaces/app']);
+    }
+    const r = spawnSync(path.join(kit, 'apply.sh'), [], { encoding: 'utf8', env: { ...process.env, PATH: `${temp}:${process.env.PATH}`, T3CODE_TEST_SYSTEM: 'unsupported' } });
+    assert.notEqual(r.status, 0);
+  } finally { await fs.rm(temp, { recursive: true, force: true }); }
+});
 
 test('refuses a different release and recognizes an unchanged second application', () => {
   const target = { patchId: 'one', originalAsarSha256: 'original' };

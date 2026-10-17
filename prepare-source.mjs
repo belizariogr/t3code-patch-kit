@@ -9,7 +9,7 @@ const kit = path.dirname(fileURLToPath(import.meta.url));
 const args = {};
 for (let i = 2; i < process.argv.length; i += 2) {
   const key = process.argv[i];
-  if (!['--repo', '--app', '--output', '--commit'].includes(key) || !process.argv[i + 1]) throw new Error(`Argumento inválido: ${key}`);
+  if (!['--repo', '--app', '--output', '--commit', '--profile'].includes(key) || !process.argv[i + 1]) throw new Error(`Argumento inválido: ${key}`);
   args[key.slice(2)] = process.argv[i + 1];
 }
 const repo = path.resolve(args.repo ?? path.join(kit, '../t3code'));
@@ -23,9 +23,9 @@ const manifest = JSON.parse(await fs.readFile(path.join(kit, 'manifest.json'), '
 let commit = args.commit;
 let version = 'source-only';
 if (!commit) {
-  const app = path.resolve(args.app ?? '/Applications/T3 Code (Beta).app');
+  const app = path.resolve(args.app ?? (process.platform === 'linux' ? '/usr/lib/t3code' : '/Applications/T3 Code (Beta).app'));
   const asar = await loadAsar(repo);
-  const metadata = JSON.parse(asar.extractFile(path.join(app, 'Contents/Resources/app.asar'), 'package.json'));
+  const metadata = JSON.parse(asar.extractFile(path.join(app, app.endsWith('.app') ? 'Contents/Resources/app.asar' : 'resources/app.asar'), 'package.json'));
   commit = metadata.t3codeCommitHash;
   version = metadata.version;
 }
@@ -34,9 +34,10 @@ const resolved = git(['rev-parse', '--verify', `${commit}^{commit}`], repo, true
 if (resolved.status !== 0) throw new Error(`Commit ${commit} ausente no fork. Busque a tag/commit da release oficial e execute novamente; não use o HEAD como substituto.`);
 commit = resolved.stdout.trim();
 const ancestor = (base) => git(['merge-base', '--is-ancestor', base, commit], repo, true).status === 0;
-const profile = ancestor(manifest.upstreamBase) ? 'modern' : 'legacy';
+const profile = args.profile ?? (ancestor(manifest.upstreamBase) ? 'modern' : ancestor(manifest.legacyBase) ? 'legacy' : manifest.linux && ancestor(manifest.linux.upstreamBase) ? 'linux' : null);
+if (!['modern', 'legacy', 'linux'].includes(profile)) throw new Error('A release não corresponde às bases conhecidas. Porte as mudanças para o commit exato; não use main como substituto.');
 if (profile === 'legacy' && !ancestor(manifest.legacyBase)) throw new Error('A versão antecede as bases do kit. É necessário portar as duas mudanças manualmente.');
-const patches = profile === 'modern' ? ['customizations.patch'] : [
+const patches = profile === 'linux' ? ['linux-customizations.patch'] : profile === 'modern' ? ['customizations.patch'] : [
   ...(ancestor(manifest.changesCommit) ? [] : ['legacy-changes.patch']),
   'legacy-pr-creation.patch',
 ];
