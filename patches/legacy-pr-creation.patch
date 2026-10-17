@@ -1,0 +1,1353 @@
+diff --git a/apps/mobile/src/features/settings/SettingsServerControlsRouteScreen.tsx b/apps/mobile/src/features/settings/SettingsServerControlsRouteScreen.tsx
+index f1f6c5a522b5d4ee9f96312aa8f78da203018e75..566fd19066c8ec12ec02e584bce9d10791289c4f 100644
+--- a/apps/mobile/src/features/settings/SettingsServerControlsRouteScreen.tsx
++++ b/apps/mobile/src/features/settings/SettingsServerControlsRouteScreen.tsx
+@@ -52,6 +52,7 @@ const PAGE_TITLES: Record<SettingsPage, string> = {
+ const PAGE_PROJECT_KEYS: Record<SettingsPage, readonly ProjectScopedServerSettingKey[]> = {
+   "new-threads": ["defaultThreadEnvMode", "worktreeSubmodules", "defaultRuntimeMode"],
+   "source-control": [
++    "pullRequestCreationEnabled",
+     "changesScope",
+     "defaultAutoPull",
+     "removeAgentCreditsOnMerge",
+@@ -400,6 +401,14 @@ function ServerSettingsDetail(props: { readonly page: SettingsPage }) {
+                     onChange={write}
+                   />
+                   <SettingsSection title="Pull requests">
++                    <SettingsSwitchRow
++                      icon="arrow.triangle.pull"
++                      label="Pull request creation"
++                      subtitle="Show pull request creation in source control actions. Turn off to only commit and push from feature branches."
++                      value={uniform("pullRequestCreationEnabled")}
++                      disabled={disabledFor("pullRequestCreationEnabled")}
++                      onValueChange={(value) => write({ pullRequestCreationEnabled: value })}
++                    />
+                     <SettingsSwitchRow
+                       icon="arrow.triangle.merge"
+                       label="Remove agent credits when merging"
+diff --git a/apps/mobile/src/features/threads/ThreadGitControls.tsx b/apps/mobile/src/features/threads/ThreadGitControls.tsx
+index ac0fd16b1be7e4e3b243ba5b6481dfd38f02f168..7bf487e1f70035fab3cb2806190bcf87ea02f0a1 100644
+--- a/apps/mobile/src/features/threads/ThreadGitControls.tsx
++++ b/apps/mobile/src/features/threads/ThreadGitControls.tsx
+@@ -17,6 +17,10 @@ import {
+   resolveQuickAction,
+ } from "@t3tools/client-runtime/state/vcs";
+ import { useNavigation } from "@react-navigation/native";
++import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
++import { useThreadShell } from "../../state/entities";
++import { useAtomValue } from "@effect/atom-react";
++import { serverEnvironment } from "../../state/server";
+ 
+ import { useCallback, useMemo } from "react";
+ import { useEnvironmentScope } from "../../state/session";
+@@ -121,6 +125,17 @@ function useThreadGitControlModel(props: ThreadGitMenuProps) {
+     AuthSourceControlWriteScope,
+   );
+   const threadId = props.threadId;
++  const settings = useAtomValue(
++    serverEnvironment.lastKnownSettingsValueAtom(EnvironmentId.make(String(environmentId))),
++  );
++  const thread = useThreadShell({
++    environmentId: EnvironmentId.make(String(environmentId)),
++    threadId: ThreadId.make(String(threadId)),
++  });
++  const pullRequestCreationEnabled = settings
++    ? resolveProjectSettings(settings, thread?.projectId ?? null).settings
++        .pullRequestCreationEnabled === true
++    : false;
+   const { gitStatus, gitOperationLabel, onPull, onRunAction } = props;
+ 
+   const currentBranchLabel = gitStatus?.refName ?? props.currentBranch ?? "Detached HEAD";
+@@ -138,7 +153,13 @@ function useThreadGitControlModel(props: ThreadGitMenuProps) {
+         hint: "This workspace is not a git repository.",
+       };
+     }
+-    const action = resolveQuickAction(gitStatus, busy, isDefaultRef, hasPrimaryRemote);
++    const action = resolveQuickAction(
++      gitStatus,
++      busy,
++      isDefaultRef,
++      hasPrimaryRemote,
++      pullRequestCreationEnabled,
++    );
+     return !canWriteSourceControl && (action.kind === "run_pull" || action.kind === "run_action")
+       ? {
+           ...action,
+@@ -146,7 +167,15 @@ function useThreadGitControlModel(props: ThreadGitMenuProps) {
+           hint: "This connection cannot change source control.",
+         }
+       : action;
+-  }, [busy, canWriteSourceControl, gitStatus, hasPrimaryRemote, isDefaultRef, isRepo]);
++  }, [
++    busy,
++    canWriteSourceControl,
++    gitStatus,
++    hasPrimaryRemote,
++    isDefaultRef,
++    isRepo,
++    pullRequestCreationEnabled,
++  ]);
+ 
+   const quickActionHint = quickAction.disabled
+     ? (quickAction.hint ?? "This action is unavailable.")
+diff --git a/apps/mobile/src/features/threads/git/GitOverviewSheet.tsx b/apps/mobile/src/features/threads/git/GitOverviewSheet.tsx
+index eaf6e53d62a0665d02f4b6d1b6c1a8d668b1ec54..dec7c05346f150ec50153ce7cff671a4eec316ef 100644
+--- a/apps/mobile/src/features/threads/git/GitOverviewSheet.tsx
++++ b/apps/mobile/src/features/threads/git/GitOverviewSheet.tsx
+@@ -1,3 +1,5 @@
++import { useAtomValue } from "@effect/atom-react";
++import { serverEnvironment } from "../../../state/server";
+ import * as Dialog from "../../../components/ui/Dialog";
+ import { useOpenPullRequest } from "../../../native/useOpenPullRequest";
+ import {
+@@ -11,6 +13,7 @@ import {
+   threadPullRequestKeyOf,
+ } from "@t3tools/shared/threadPullRequests";
+ import { EnvironmentId, ThreadId } from "@t3tools/contracts";
++import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
+ import {
+   CommonActions,
+   StackActions,
+@@ -87,6 +90,11 @@ function GitOverviewSheetContent(props: GitOverviewSheetProps) {
+       ),
+     [selectedThread?.pullRequests, supportsLinkedPrSnapshots],
+   );
++  const settings = useAtomValue(serverEnvironment.lastKnownSettingsValueAtom(environmentId));
++  const pullRequestCreationEnabled = settings
++    ? resolveProjectSettings(settings, selectedThread?.projectId ?? null).settings
++        .pullRequestCreationEnabled === true
++    : false;
+   const gitState = useSelectedThreadGitState();
+   const gitActions = useSelectedThreadGitActions();
+   const { canWriteSourceControl, canChangeThreadBranch } = gitActions;
+@@ -113,8 +121,11 @@ function GitOverviewSheetContent(props: GitOverviewSheetProps) {
+   const isDefaultRef = gitStatus.data?.isDefaultRef ?? false;
+ 
+   const menuItems = useMemo(
+-    () => (isRepo ? buildMenuItems(gitStatus.data, busy, hasPrimaryRemote) : []),
+-    [busy, gitStatus.data, hasPrimaryRemote, isRepo],
++    () =>
++      isRepo
++        ? buildMenuItems(gitStatus.data, busy, hasPrimaryRemote, pullRequestCreationEnabled)
++        : [],
++    [busy, gitStatus.data, hasPrimaryRemote, isRepo, pullRequestCreationEnabled],
+   );
+ 
+   const sheetMenuItems = useMemo(
+diff --git a/apps/mobile/src/state/use-selected-thread-git-actions.test.ts b/apps/mobile/src/state/use-selected-thread-git-actions.test.ts
+index 760bbd859cb83523640b64ee4fd5ca4d04c3dfb0..f95de96b6140550f0f5547ed81781693f7fb9581 100644
+--- a/apps/mobile/src/state/use-selected-thread-git-actions.test.ts
++++ b/apps/mobile/src/state/use-selected-thread-git-actions.test.ts
+@@ -1,15 +1,24 @@
+-import { AuthOrchestrationOperateScope, AuthSourceControlWriteScope } from "@t3tools/contracts";
++import {
++  AuthOrchestrationOperateScope,
++  AuthSourceControlWriteScope,
++  DEFAULT_SERVER_SETTINGS,
++  ProjectId,
++  type ServerSettings,
++} from "@t3tools/contracts";
+ import * as Cause from "effect/Cause";
+ import { AsyncResult } from "effect/reactivity";
+ import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
+ 
+ const state = vi.hoisted(() => ({
++  settings: undefined as ServerSettings | undefined,
++  dispatchedActions: [] as string[],
+   scopes: new Set<string>(),
+   primaryScopes: new Set<string>(),
+   branch: "main",
+   worktrees: [] as string[],
+   thread: {
+     id: "thread",
++    projectId: "project",
+     environmentId: "environment",
+     branch: "main",
+     worktreePath: null as string | null,
+@@ -50,7 +59,17 @@ vi.mock("./queries", () => ({
+   useBranches: () => ({ data: { refs: [] }, refresh: () => {} }),
+ }));
+ vi.mock("./use-atom-command", () => ({ useAtomCommand: (command: unknown) => command }));
+-vi.mock("./atom-registry", () => ({ appAtomRegistry: {} }));
++vi.mock("./atom-registry", () => ({
++  appAtomRegistry: {
++    get: (atom: unknown) => (atom === "last-known-settings" ? (state.settings ?? null) : null),
++  },
++}));
++vi.mock("./server", () => ({
++  serverEnvironment: {
++    configValueAtom: () => "current-settings",
++    lastKnownSettingsValueAtom: () => "last-known-settings",
++  },
++}));
+ vi.mock("./use-remote-environment-registry", () => ({ setPendingConnectionError: () => {} }));
+ vi.mock("./use-vcs-action-state", () => ({
+   showGitActionResult: (result: { type: string; description?: string }) =>
+@@ -103,6 +122,7 @@ vi.mock("./vcs", () => ({
+   vcsActionManager: {
+     track: (_registry: unknown, _target: unknown, _operation: unknown, run: () => unknown) => run(),
+     runStackedAction: () => async (input: { action: string; featureBranch?: boolean }) => {
++      state.dispatchedActions.push(input.action);
+       if (input.featureBranch) state.branch = "feature";
+       if (input.action === "commit") state.commits += 1;
+       if (input.action === "push") state.pushes += 1;
+@@ -133,6 +153,8 @@ describe("thread Git mutation permissions", () => {
+     state.results = [];
+     state.afterGitAction = undefined;
+     state.statusRefreshes = 0;
++    state.settings = { ...DEFAULT_SERVER_SETTINGS };
++    state.dispatchedActions = [];
+   });
+ 
+   it.each([false, true])(
+@@ -279,4 +301,40 @@ describe("thread Git mutation permissions", () => {
+     expect(state.thread.branch).toBe("main");
+     expect(state.results).toEqual([]);
+   });
++
++  it.each(["create_pr", "commit_push_pr"] as const)(
++    "rechecks the last known settings before dispatching a retained %s action",
++    async (action) => {
++      const actions = useSelectedThreadGitActions();
++      state.settings = { ...DEFAULT_SERVER_SETTINGS, pullRequestCreationEnabled: false };
++      expect(await actions.onRunSelectedThreadGitAction({ action })).toBeNull();
++      state.settings = undefined;
++      expect(await actions.onRunSelectedThreadGitAction({ action })).toBeNull();
++      state.settings = {
++        ...DEFAULT_SERVER_SETTINGS,
++        projectSettingsOverrides: {
++          [ProjectId.make("project")]: { pullRequestCreationEnabled: false },
++        },
++      };
++      expect(await actions.onRunSelectedThreadGitAction({ action })).toBeNull();
++      expect(state.dispatchedActions).toEqual([]);
++      state.settings = {
++        ...DEFAULT_SERVER_SETTINGS,
++        pullRequestCreationEnabled: false,
++        projectSettingsOverrides: {
++          [ProjectId.make("project")]: { pullRequestCreationEnabled: true },
++        },
++      };
++      expect(await actions.onRunSelectedThreadGitAction({ action })).not.toBeNull();
++      expect(state.dispatchedActions).toEqual([action]);
++    },
++  );
++
++  it("keeps commit and push actions available without current settings", async () => {
++    state.settings = undefined;
++    const actions = useSelectedThreadGitActions();
++    await actions.onRunSelectedThreadGitAction({ action: "commit" });
++    await actions.onRunSelectedThreadGitAction({ action: "push" });
++    expect(state.dispatchedActions).toEqual(["commit", "push"]);
++  });
+ });
+diff --git a/apps/mobile/src/state/use-selected-thread-git-actions.test.tsx b/apps/mobile/src/state/use-selected-thread-git-actions.test.tsx
+index 3ae74ce6fe4415ea33b8a755f686c5f1853a0590..a9b4e25b7630470b3faaae2eb8cc47621234a994 100644
+--- a/apps/mobile/src/state/use-selected-thread-git-actions.test.tsx
++++ b/apps/mobile/src/state/use-selected-thread-git-actions.test.tsx
+@@ -34,6 +34,9 @@ vi.mock("./threads", () => ({ threadEnvironment: { updateMetadata: "updateMetada
+ vi.mock("./queries", () => ({ useBranches: () => ({ data: null, refresh: () => {} }) }));
+ vi.mock("../lib/uuid", () => ({ uuidv4: () => "uuid" }));
+ vi.mock("./atom-registry", () => ({ appAtomRegistry: {} }));
++vi.mock("./server", () => ({
++  serverEnvironment: { configValueAtom: () => null, lastKnownSettingsValueAtom: () => null },
++}));
+ vi.mock("./session", () => ({
+   readEnvironmentScope: () => true,
+   useEnvironmentScope: () => true,
+diff --git a/apps/mobile/src/state/use-selected-thread-git-actions.ts b/apps/mobile/src/state/use-selected-thread-git-actions.ts
+index cb4e2d689dec9f08870020cf057047fbc76c5563..b73bc6b41070d30d1d0c6b20cb20e46241a6b704 100644
+--- a/apps/mobile/src/state/use-selected-thread-git-actions.ts
++++ b/apps/mobile/src/state/use-selected-thread-git-actions.ts
+@@ -17,6 +17,7 @@ import {
+   dedupeRemoteBranchesWithLocalMatches,
+   sanitizeFeatureBranchName,
+ } from "@t3tools/shared/git";
++import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
+ import * as Cause from "effect/Cause";
+ import { AsyncResult } from "effect/reactivity";
+ 
+@@ -25,6 +26,7 @@ import { threadEnvironment } from "../state/threads";
+ import { vcsActionManager, vcsEnvironment } from "../state/vcs";
+ import { uuidv4 } from "../lib/uuid";
+ import { appAtomRegistry } from "./atom-registry";
++import { serverEnvironment } from "./server";
+ import { readEnvironmentScope, useEnvironmentScope } from "./session";
+ import { setPendingConnectionError } from "./use-remote-environment-registry";
+ import { useAtomCommand } from "./use-atom-command";
+@@ -378,6 +380,17 @@ export function useSelectedThreadGitActions() {
+ 
+   const onRunSelectedThreadGitAction = useCallback(
+     async (input: GitActionRequestInput): Promise<GitRunStackedActionResult | null> => {
++      if (input.action === "create_pr" || input.action === "commit_push_pr") {
++        const currentSettings = appAtomRegistry.get(
++          serverEnvironment.lastKnownSettingsValueAtom(selectedThread?.environmentId ?? null),
++        );
++        if (
++          !currentSettings ||
++          resolveProjectSettings(currentSettings, selectedThread?.projectId ?? null).settings
++            .pullRequestCreationEnabled !== true
++        )
++          return null;
++      }
+       const actionId = uuidv4();
+       return await runSelectedThreadGitMutation(
+         "run_change_request",
+@@ -426,6 +439,7 @@ export function useSelectedThreadGitActions() {
+       runStackedAction,
+       refreshSelectedThreadGitStatus,
+       runSelectedThreadGitMutation,
++      selectedThread,
+       selectedThreadWorktreePath,
+       syncSelectedThreadBranchState,
+     ],
+diff --git a/apps/web/src/components/GitActionsControl.lifecycle.test.ts b/apps/web/src/components/GitActionsControl.lifecycle.test.ts
+index 84d5b1b4271f9358e2f365f129f382853821d161..a7d1f3d2410932802fa776e561ad5dad0529efd9 100644
+--- a/apps/web/src/components/GitActionsControl.lifecycle.test.ts
++++ b/apps/web/src/components/GitActionsControl.lifecycle.test.ts
+@@ -1,5 +1,13 @@
+ // @vitest-environment jsdom
+-import { AuthSourceControlWriteScope, EnvironmentId, ThreadId } from "@t3tools/contracts";
++import {
++  AuthSourceControlWriteScope,
++  DEFAULT_SERVER_SETTINGS,
++  EnvironmentId,
++  ProjectId,
++  ThreadId,
++  type GitRunStackedActionToastCta,
++  type ServerSettings,
++} from "@t3tools/contracts";
+ import { AsyncResult } from "effect/reactivity";
+ import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
+ 
+@@ -9,16 +17,32 @@ const state = vi.hoisted(() => ({
+     input: { threadId?: string; action: string };
+   }[],
+   toasts: [] as { type?: string; description?: string; actionProps?: { onClick: () => void } }[],
++  settings: undefined as ServerSettings | undefined,
++  currentConfigAvailable: true,
++  toastCta: undefined as GitRunStackedActionToastCta | undefined,
++  afterAction: undefined as (() => void) | undefined,
++  openedPrs: [] as string[],
+   scopes: new Set<string>(),
+   primaryScopes: new Set<string>(),
+ }));
+ 
+ vi.mock("@effect/atom-react", () => ({
+-  useAtomValue: (atom: unknown) => (atom === "vcs-state" ? { isRunning: false } : null),
++  useAtomValue: (atom: unknown) =>
++    atom === "vcs-state"
++      ? { isRunning: false }
++      : atom === "last-known-settings"
++        ? (state.settings ?? null)
++        : atom === "server-config" && state.currentConfigAvailable
++          ? { settings: state.settings }
++          : null,
+ }));
+ vi.mock("~/state/entities", () => ({
+   useThreadProjection: () => null,
+-  useThreadShell: (ref: { threadId: string }) => ({ branch: "main", id: ref.threadId }),
++  useThreadShell: (ref: { threadId: string }) => ({
++    branch: "main",
++    id: ref.threadId,
++    projectId: `${ref.threadId}-project`,
++  }),
+ }));
+ vi.mock("~/state/session", () => ({
+   useEnvironmentScope: (environmentId: unknown, scope: string) =>
+@@ -27,7 +51,22 @@ vi.mock("~/state/session", () => ({
+     (environmentId === "environment" ? state.scopes : state.primaryScopes).has(scope),
+ }));
+ vi.mock("~/state/use-atom-command", () => ({ useAtomCommand: (command: unknown) => command }));
+-vi.mock("~/state/server", () => ({ serverEnvironment: { configValueAtom: () => null } }));
++vi.mock("~/state/server", () => ({
++  serverEnvironment: {
++    configValueAtom: () => "server-config",
++    lastKnownSettingsValueAtom: () => "last-known-settings",
++  },
++}));
++vi.mock("~/rpc/atomRegistry", () => ({
++  appAtomRegistry: {
++    get: (atom: unknown) =>
++      atom === "last-known-settings"
++        ? (state.settings ?? null)
++        : state.currentConfigAvailable
++          ? { settings: state.settings }
++          : null,
++  },
++}));
+ vi.mock("~/state/sourceControl", () => ({ sourceControlEnvironment: { discovery: () => null } }));
+ vi.mock("~/state/vcs", () => ({
+   vcsEnvironment: { status: () => null },
+@@ -75,6 +114,7 @@ vi.mock("~/lib/sourceControlActions", () => ({
+   useGitStackedAction: (scope: { environmentId: string | null; cwd: string | null }) => ({
+     run: async (input: { featureBranch?: boolean; threadId?: string; action: string }) => {
+       state.actions.push({ scope, input });
++      state.afterAction?.();
+       return {
+         _tag: "Success",
+         value: {
+@@ -82,11 +122,7 @@ vi.mock("~/lib/sourceControlActions", () => ({
+           toast: {
+             title: "Committed",
+             description: "Committed",
+-            cta: {
+-              kind: "run_action",
+-              label: "Push & create PR",
+-              action: { kind: "commit_push_pr" },
+-            },
++            cta: state.toastCta,
+           },
+         },
+       };
+@@ -96,7 +132,9 @@ vi.mock("~/lib/sourceControlActions", () => ({
+ vi.mock("~/lib/utils", () => ({ cn: () => "", randomUUID: () => "action" }));
+ vi.mock("~/editorPreferences", () => ({ useOpenInPreferredEditor: () => () => {} }));
+ vi.mock("~/browser/useOpenLink", () => ({ useOpenLink: () => () => {} }));
+-vi.mock("~/lib/openPullRequestLink", () => ({ useOpenPrLink: () => () => {} }));
++vi.mock("~/lib/openPullRequestLink", () => ({
++  useOpenPrLink: () => (_event: unknown, url: string) => state.openedPrs.push(url),
++}));
+ vi.mock("~/components/ui/toast", () => ({
+   stackedThreadToast: (input: unknown) => input,
+   toastManager: {
+@@ -191,6 +229,15 @@ beforeEach(() => {
+   state.primaryScopes = new Set([AuthSourceControlWriteScope]);
+   state.actions = [];
+   state.toasts = [];
++  state.settings = { ...DEFAULT_SERVER_SETTINGS };
++  state.currentConfigAvailable = true;
++  state.toastCta = {
++    kind: "run_action",
++    label: "Push & create PR",
++    action: { kind: "commit_push_pr" },
++  };
++  state.afterAction = undefined;
++  state.openedPrs = [];
+ });
+ 
+ afterEach(async () => {
+@@ -232,3 +279,176 @@ describe("Git action targets across thread navigation", () => {
+     }
+   });
+ });
++
++describe("PR creation in result notifications", () => {
++  it.each(["create_pr", "commit_push_pr"] as const)(
++    "omits a %s notification action when PR creation is disabled",
++    async (kind) => {
++      state.settings = { ...DEFAULT_SERVER_SETTINGS, pullRequestCreationEnabled: false };
++      state.toastCta = { kind: "run_action", label: "Create PR", action: { kind } };
++      const renderer = await renderActions("first", "/first");
++      await clickQuickAction(renderer);
++      expect(state.actions.map(({ input }) => input.action)).toEqual(["commit_push"]);
++      expect(state.toasts.at(-1)?.type).toBe("success");
++      expect(state.toasts.at(-1)?.actionProps).toBeUndefined();
++    },
++  );
++
++  it("checks the setting again when the action finishes", async () => {
++    state.afterAction = () => {
++      state.settings = { ...DEFAULT_SERVER_SETTINGS, pullRequestCreationEnabled: false };
++    };
++    const renderer = await renderActions("first", "/first");
++    await clickQuickAction(renderer);
++    expect(state.toasts.at(-1)?.type).toBe("success");
++    expect(state.toasts.at(-1)?.actionProps).toBeUndefined();
++  });
++
++  it.each(["create_pr", "commit_push_pr"] as const)(
++    "blocks a retained %s action after its project disables PR creation",
++    async (kind) => {
++      state.toastCta = { kind: "run_action", label: "Create PR", action: { kind } };
++      const renderer = await renderActions("first", "/first");
++      await clickQuickAction(renderer);
++      const toast = state.toasts.find((toast) => toast.actionProps)!;
++      expect(toast).toBeDefined();
++      await act(async () => {
++        renderer.update(createElement(MemoGitActionsControl, props("second", "/second")));
++      });
++      state.settings = {
++        ...DEFAULT_SERVER_SETTINGS,
++        projectSettingsOverrides: {
++          [ProjectId.make("first-project")]: { pullRequestCreationEnabled: false },
++        },
++      };
++      const previousActionCount = state.actions.length;
++      await act(async () => {
++        toast.actionProps!.onClick();
++      });
++      expect(state.actions).toHaveLength(previousActionCount);
++    },
++  );
++
++  it.each(["create_pr", "commit_push_pr"] as const)(
++    "blocks a retained %s action when there are no known settings",
++    async (kind) => {
++      state.toastCta = { kind: "run_action", label: "Create PR", action: { kind } };
++      const renderer = await renderActions("first", "/first");
++      await clickQuickAction(renderer);
++      const toast = state.toasts.find((toast) => toast.actionProps)!;
++      expect(toast).toBeDefined();
++      state.settings = undefined;
++      const previousActionCount = state.actions.length;
++      await act(async () => toast.actionProps!.onClick());
++      expect(state.actions).toHaveLength(previousActionCount);
++    },
++  );
++
++  it.each([true, false])(
++    "keeps the last known PR preference (%s) while current configuration reloads",
++    async (enabled) => {
++      state.settings = { ...DEFAULT_SERVER_SETTINGS, pullRequestCreationEnabled: enabled };
++      const renderer = await renderActions("first", "/first");
++      state.currentConfigAvailable = false;
++      await act(async () => {
++        renderer.update(createElement(MemoGitActionsControl, props("first", "/first")));
++      });
++      await clickQuickAction(renderer);
++      expect(state.actions.at(-1)?.input.action).toBe(enabled ? "commit_push_pr" : "commit_push");
++      expect(Boolean(state.toasts.at(-1)?.actionProps)).toBe(enabled);
++      if (enabled) {
++        await act(async () => state.toasts.at(-1)!.actionProps!.onClick());
++        expect(state.actions).toHaveLength(2);
++        expect(state.actions.at(-1)?.input.action).toBe("commit_push_pr");
++      }
++    },
++  );
++
++  it("omits PR quick actions and notification actions until settings load", async () => {
++    state.settings = undefined;
++    const renderer = await renderActions("first", "/first");
++    await clickQuickAction(renderer);
++    expect(state.actions.map(({ input }) => input.action)).toEqual(["commit_push"]);
++    expect(state.toasts.at(-1)?.actionProps).toBeUndefined();
++    state.settings = { ...DEFAULT_SERVER_SETTINGS };
++    await act(async () => {
++      renderer.update(createElement(MemoGitActionsControl, props("first", "/first")));
++    });
++    await clickQuickAction(renderer);
++    expect(state.actions.at(-1)?.input.action).toBe("commit_push_pr");
++  });
++
++  it("omits a PR notification if there are no known settings when an action finishes", async () => {
++    state.afterAction = () => {
++      state.settings = undefined;
++    };
++    const renderer = await renderActions("first", "/first");
++    await clickQuickAction(renderer);
++    expect(state.toasts.at(-1)?.type).toBe("success");
++    expect(state.toasts.at(-1)?.actionProps).toBeUndefined();
++  });
++
++  it("uses the originating project's enabled override for a retained action", async () => {
++    state.settings = {
++      ...DEFAULT_SERVER_SETTINGS,
++      pullRequestCreationEnabled: false,
++      projectSettingsOverrides: {
++        [ProjectId.make("first-project")]: { pullRequestCreationEnabled: true },
++      },
++    };
++    const renderer = await renderActions("first", "/first");
++    await clickQuickAction(renderer);
++    const toast = state.toasts.find((toast) => toast.actionProps)!;
++    expect(toast).toBeDefined();
++    await act(async () => {
++      renderer.update(createElement(MemoGitActionsControl, props("second", "/second")));
++    });
++    await act(async () => {
++      toast.actionProps!.onClick();
++    });
++    expect(state.actions.at(-1)).toMatchObject({
++      scope: { cwd: "/first" },
++      input: { threadId: "first", action: "commit_push_pr" },
++    });
++  });
++
++  it.each(["disabled", "unavailable"])(
++    "keeps Push notification actions with settings %s",
++    async (mode) => {
++      state.settings =
++        mode === "disabled"
++          ? { ...DEFAULT_SERVER_SETTINGS, pullRequestCreationEnabled: false }
++          : undefined;
++      state.toastCta = { kind: "run_action", label: "Push", action: { kind: "push" } };
++      const renderer = await renderActions("first", "/first");
++      await clickQuickAction(renderer);
++      const toast = state.toasts.find((toast) => toast.actionProps)!;
++      expect(toast).toBeDefined();
++      await act(async () => {
++        toast.actionProps!.onClick();
++      });
++      expect(state.actions.map(({ input }) => input.action)).toEqual(["commit_push", "push"]);
++    },
++  );
++
++  it.each(["disabled", "unavailable"])(
++    "keeps links to existing PRs with settings %s",
++    async (mode) => {
++      state.settings =
++        mode === "disabled"
++          ? { ...DEFAULT_SERVER_SETTINGS, pullRequestCreationEnabled: false }
++          : undefined;
++      const url = "https://example.com/pull/1";
++      state.toastCta = { kind: "open_pr", label: "View PR", url };
++      const renderer = await renderActions("first", "/first");
++      await clickQuickAction(renderer);
++      const toast = state.toasts.find((toast) => toast.actionProps)!;
++      expect(toast).toBeDefined();
++      await act(async () => {
++        toast.actionProps!.onClick();
++      });
++      expect(state.openedPrs).toEqual([url]);
++      expect(state.actions).toHaveLength(1);
++    },
++  );
++});
+diff --git a/apps/web/src/components/GitActionsControl.logic.test.ts b/apps/web/src/components/GitActionsControl.logic.test.ts
+index 12aee26c757ed118e811f6948b65160a43c4c6c6..107a963a90db53b394acbc3fe6fdb15c86c868e5 100644
+--- a/apps/web/src/components/GitActionsControl.logic.test.ts
++++ b/apps/web/src/components/GitActionsControl.logic.test.ts
+@@ -36,6 +36,74 @@ function status(overrides: Partial<VcsStatusResult> = {}): VcsStatusResult {
+   };
+ }
+ 
++describe("pull request creation preference", () => {
++  it("hides Create PR while keeping Commit and Push", () => {
++    const items = buildMenuItems(status({ aheadCount: 1 }), false, true, false);
++    assert.deepEqual(
++      items.map((item) => item.label),
++      ["Commit", "Push"],
++    );
++    assert.isFalse(items[1]!.disabled);
++  });
++
++  it.each([true, false])("commits and pushes with hasUpstream=%s", (hasUpstream) => {
++    assert.deepEqual(
++      resolveQuickAction(
++        status({ hasWorkingTreeChanges: true, hasUpstream }),
++        false,
++        false,
++        true,
++        false,
++      ),
++      { label: "Commit & push", disabled: false, kind: "run_action", action: "commit_push" },
++    );
++  });
++
++  it.each([true, false])("pushes local commits with hasUpstream=%s", (hasUpstream) => {
++    assert.deepEqual(
++      resolveQuickAction(status({ aheadCount: 1, hasUpstream }), false, false, true, false),
++      { label: "Push", disabled: false, kind: "run_action", action: "push" },
++    );
++  });
++
++  it("does not offer a PR for a feature branch already pushed", () => {
++    const gitStatus = status({ aheadOfDefaultCount: 2 });
++    assert.equal(resolveQuickAction(gitStatus, false, false, true, true).action, "create_pr");
++    const disabled = resolveQuickAction(gitStatus, false, false, true, false);
++    assert.equal(disabled.kind, "show_hint");
++    assert.isTrue(disabled.disabled);
++    assert.isUndefined(disabled.action);
++  });
++
++  it("restores PR creation when enabled again", () => {
++    const gitStatus = status({ hasWorkingTreeChanges: true });
++    assert.equal(resolveQuickAction(gitStatus, false, false, true, false).action, "commit_push");
++    assert.equal(resolveQuickAction(gitStatus, false, false, true, true).action, "commit_push_pr");
++    assert.isTrue(
++      buildMenuItems(gitStatus, false, true, true).some(
++        (item) => item.dialogAction === "create_pr",
++      ),
++    );
++  });
++
++  it("still pulls a behind branch and commits without a remote", () => {
++    assert.equal(
++      resolveQuickAction(status({ behindCount: 1 }), false, false, true, false).kind,
++      "run_pull",
++    );
++    assert.equal(
++      resolveQuickAction(
++        status({ hasWorkingTreeChanges: true, hasUpstream: false }),
++        false,
++        false,
++        false,
++        false,
++      ).action,
++      "commit",
++    );
++  });
++});
++
+ describe("git action progress presentation", () => {
+   it("keeps the phase on the first row and hook output on the second", () => {
+     assert.deepEqual(
+diff --git a/apps/web/src/components/GitActionsControl.logic.ts b/apps/web/src/components/GitActionsControl.logic.ts
+index 187a8317bf9949b2562d29f502618f08e248229f..bf9d05eb43c8699039e6e86d51c5d3df12a5826f 100644
+--- a/apps/web/src/components/GitActionsControl.logic.ts
++++ b/apps/web/src/components/GitActionsControl.logic.ts
+@@ -159,6 +159,7 @@ export function buildMenuItems(
+   gitStatus: VcsStatusResult | null,
+   isBusy: boolean,
+   hasPrimaryRemote = true,
++  pullRequestCreationEnabled = true,
+ ): GitActionMenuItem[] {
+   if (!gitStatus) return [];
+   const terminology = resolveChangeRequestTerminology(gitStatus);
+@@ -206,7 +207,7 @@ export function buildMenuItems(
+     dialogAction: "push",
+   };
+ 
+-  if (hasOpenPr) {
++  if (hasOpenPr || !pullRequestCreationEnabled) {
+     return [commitItem, pushItem];
+   }
+ 
+@@ -229,6 +230,7 @@ export function resolveQuickAction(
+   isBusy: boolean,
+   isDefaultRef = false,
+   hasPrimaryRemote = true,
++  pullRequestCreationEnabled = true,
+ ): GitQuickAction {
+   if (isBusy) {
+     return { label: "Commit", disabled: true, kind: "show_hint", hint: "Git action in progress." };
+@@ -265,7 +267,7 @@ export function resolveQuickAction(
+     if (!gitStatus.hasUpstream && !hasPrimaryRemote) {
+       return { label: "Commit", disabled: false, kind: "run_action", action: "commit" };
+     }
+-    if (hasOpenPr || isDefaultRef) {
++    if (hasOpenPr || isDefaultRef || !pullRequestCreationEnabled) {
+       return { label: "Commit & push", disabled: false, kind: "run_action", action: "commit_push" };
+     }
+     return {
+@@ -300,7 +302,7 @@ export function resolveQuickAction(
+         hint: "No local commits to push.",
+       };
+     }
+-    if (hasOpenPr || isDefaultRef) {
++    if (hasOpenPr || isDefaultRef || !pullRequestCreationEnabled) {
+       return {
+         label: "Push",
+         disabled: false,
+@@ -334,7 +336,7 @@ export function resolveQuickAction(
+   }
+ 
+   if (isAhead) {
+-    if (hasOpenPr || isDefaultRef) {
++    if (hasOpenPr || isDefaultRef || !pullRequestCreationEnabled) {
+       return {
+         label: "Push",
+         disabled: false,
+@@ -359,7 +361,7 @@ export function resolveQuickAction(
+     };
+   }
+ 
+-  if (hasDefaultBranchDelta && !isDefaultRef) {
++  if (pullRequestCreationEnabled && hasDefaultBranchDelta && !isDefaultRef) {
+     return {
+       label: `Create ${terminology.shortLabel}`,
+       disabled: false,
+diff --git a/apps/web/src/components/GitActionsControl.test.ts b/apps/web/src/components/GitActionsControl.test.ts
+index 18651179654032797a95d5795e22d1bb834a4c48..1a7b5342bdeaeeadcf5ac18155cf9ab783364771 100644
+--- a/apps/web/src/components/GitActionsControl.test.ts
++++ b/apps/web/src/components/GitActionsControl.test.ts
+@@ -47,7 +47,10 @@ vi.mock("~/state/session", () => ({
+     (environmentId === "environment" ? state.scopes : state.primaryScopes).has(scope),
+ }));
+ vi.mock("~/state/use-atom-command", () => ({ useAtomCommand: (command: unknown) => command }));
+-vi.mock("~/state/server", () => ({ serverEnvironment: { configValueAtom: () => null } }));
++vi.mock("~/state/server", () => ({
++  serverEnvironment: { configValueAtom: () => null, lastKnownSettingsValueAtom: () => null },
++}));
++vi.mock("~/rpc/atomRegistry", () => ({ appAtomRegistry: { get: () => null } }));
+ vi.mock("~/state/sourceControl", () => ({ sourceControlEnvironment: {} }));
+ vi.mock("~/state/vcs", () => ({
+   vcsEnvironment: { status: () => null },
+diff --git a/apps/web/src/components/GitActionsControl.tsx b/apps/web/src/components/GitActionsControl.tsx
+index 1d0cd5cee95b5163ca1087c8577f8948d9ae8396..3c567dd1ff1f3d689689b5a809938ec9ac7dc52d 100644
+--- a/apps/web/src/components/GitActionsControl.tsx
++++ b/apps/web/src/components/GitActionsControl.tsx
+@@ -1,11 +1,12 @@
+ import { ThreadDetailsControl } from "./chat/ThreadDetailsControl";
+ import { ThreadChangesControl } from "./chat/ThreadChangesControl";
++import { DEFAULT_SERVER_SETTINGS } from "@t3tools/contracts";
+ import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
+ import { useAtomValue } from "@effect/atom-react";
++import { appAtomRegistry } from "~/rpc/atomRegistry";
+ import {
+   AuthOrchestrationOperateScope,
+   AuthSourceControlWriteScope,
+-  DEFAULT_SERVER_SETTINGS,
+   SourceControlProviderKind,
+   type ScopedThreadRef,
+ } from "@t3tools/contracts";
+@@ -1007,6 +1008,9 @@ export default function GitActionsControl({
+   );
+   const canOperateThread = useEnvironmentScope(activeEnvironmentId, AuthOrchestrationOperateScope);
+   const serverConfig = useAtomValue(serverEnvironment.configValueAtom(activeEnvironmentId));
++  const sourceControlSettings = useAtomValue(
++    serverEnvironment.lastKnownSettingsValueAtom(activeEnvironmentId),
++  );
+   const openInPreferredEditor = useOpenInPreferredEditor(
+     activeEnvironmentId,
+     serverConfig?.availableEditors ?? [],
+@@ -1136,10 +1140,17 @@ export default function GitActionsControl({
+   const isRepo = gitStatus?.isRepo ?? true;
+   const hasPrimaryRemote = gitStatus?.hasPrimaryRemote ?? false;
+   const gitStatusForActions = gitStatus;
+-  const changesScope = resolveProjectSettings(
++  const projectSettings = resolveProjectSettings(
+     serverConfig?.settings ?? DEFAULT_SERVER_SETTINGS,
+     activeServerThread?.projectId ?? activeDraftThread?.projectId ?? null,
+-  ).settings.changesScope;
++  ).settings;
++  const { changesScope } = projectSettings;
++  const pullRequestCreationEnabled = sourceControlSettings
++    ? resolveProjectSettings(
++        sourceControlSettings,
++        activeServerThread?.projectId ?? activeDraftThread?.projectId ?? null,
++      ).settings.pullRequestCreationEnabled === true
++    : false;
+ 
+   const allFiles = gitStatusForActions?.workingTree.files ?? [];
+   const selectedFiles = allFiles.filter((f) => !excludedFiles.has(f.path));
+@@ -1186,13 +1197,31 @@ export default function GitActionsControl({
+   }, [gitStatusForActions?.isDefaultRef]);
+ 
+   const gitActionMenuItems = useMemo(
+-    () => buildMenuItems(gitStatusForActions, isGitActionRunning, hasPrimaryRemote),
+-    [gitStatusForActions, hasPrimaryRemote, isGitActionRunning],
++    () =>
++      buildMenuItems(
++        gitStatusForActions,
++        isGitActionRunning,
++        hasPrimaryRemote,
++        pullRequestCreationEnabled,
++      ),
++    [gitStatusForActions, hasPrimaryRemote, isGitActionRunning, pullRequestCreationEnabled],
+   );
+   const quickAction = useMemo(
+     () =>
+-      resolveQuickAction(gitStatusForActions, isGitActionRunning, isDefaultRef, hasPrimaryRemote),
+-    [gitStatusForActions, hasPrimaryRemote, isDefaultRef, isGitActionRunning],
++      resolveQuickAction(
++        gitStatusForActions,
++        isGitActionRunning,
++        isDefaultRef,
++        hasPrimaryRemote,
++        pullRequestCreationEnabled,
++      ),
++    [
++      gitStatusForActions,
++      hasPrimaryRemote,
++      isDefaultRef,
++      isGitActionRunning,
++      pullRequestCreationEnabled,
++    ],
+   );
+   const quickActionDisabledReason = !canWriteSourceControl
+     ? "This connection cannot change source control."
+@@ -1262,6 +1291,21 @@ export default function GitActionsControl({
+           !readEnvironmentScope(activeEnvironmentId, AuthOrchestrationOperateScope))
+       )
+         return;
++      // Retained toast callbacks must use current settings for their original project.
++      const canRunAction = (candidate: GitStackedAction) => {
++        if (candidate !== "create_pr" && candidate !== "commit_push_pr") return true;
++        const currentSettings = appAtomRegistry.get(
++          serverEnvironment.lastKnownSettingsValueAtom(activeEnvironmentId),
++        );
++        return (
++          currentSettings !== null &&
++          resolveProjectSettings(
++            currentSettings,
++            activeServerThread?.projectId ?? activeDraftThread?.projectId ?? null,
++          ).settings.pullRequestCreationEnabled === true
++        );
++      };
++      if (!canRunAction(action)) return;
+       const actionStatus = statusOverride ?? gitStatusForActions;
+       const actionBranch = actionStatus?.refName ?? null;
+       const actionIsDefaultBranch = featureBranch ? false : isDefaultRef;
+@@ -1350,7 +1394,7 @@ export default function GitActionsControl({
+         children: string;
+         onClick: (event: MouseEvent<HTMLButtonElement>) => void;
+       } | null = null;
+-      if (toastCta.kind === "run_action") {
++      if (toastCta.kind === "run_action" && canRunAction(toastCta.action.kind)) {
+         toastActionProps = {
+           children: toastCta.label,
+           onClick: () => {
+diff --git a/apps/web/src/components/settings/ProjectDefaultsSettings.tsx b/apps/web/src/components/settings/ProjectDefaultsSettings.tsx
+index cf9dce62f78dd00057c967aa1a99aae968287b8f..4da525751762540989e168105203b1c6de994378 100644
+--- a/apps/web/src/components/settings/ProjectDefaultsSettings.tsx
++++ b/apps/web/src/components/settings/ProjectDefaultsSettings.tsx
+@@ -80,6 +80,7 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
+   const mixedBrowser = useScopedSettingsMixed(["enableAgentBrowserAccess"]);
+   const mixedAutoPull = useScopedSettingsMixed(["defaultAutoPull"]);
+   const mixedChangesScope = useScopedSettingsMixed(["changesScope"]);
++  const mixedPrCreation = useScopedSettingsMixed(["pullRequestCreationEnabled"]);
+   const mixedAgentCredits = useScopedSettingsMixed(["removeAgentCreditsOnMerge"]);
+   const mixedMergeMethod = useScopedSettingsMixed(["pullRequestMergeMethod"]);
+   const modelSource = useScopedSettingSource(["defaultModelSelection"]);
+@@ -382,6 +383,31 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
+         </>
+       ) : category === "source-control" ? (
+         <>
++          <SettingsRow
++            serverScoped
++            settingKeys={["pullRequestCreationEnabled"]}
++            mixed={mixedPrCreation}
++            {...searchableSetting("pull-request-creation")}
++            description="Show pull request creation in source control actions. Turn off to only commit and push from feature branches."
++            resetAction={
++              !settings.pullRequestCreationEnabled ? (
++                <SettingResetButton
++                  label="pull request creation"
++                  onClick={() => updateSettings({ pullRequestCreationEnabled: true })}
++                />
++              ) : null
++            }
++            control={
++              <Switch
++                aria-label="Pull request creation"
++                mixed={mixedPrCreation}
++                checked={mixedPrCreation ? false : settings.pullRequestCreationEnabled}
++                onCheckedChange={(enabled) =>
++                  updateSettings({ pullRequestCreationEnabled: enabled })
++                }
++              />
++            }
++          />
+           <SettingsRow
+             serverScoped
+             settingKeys={["changesScope"]}
+diff --git a/apps/web/src/components/settings/settingsSearch.ts b/apps/web/src/components/settings/settingsSearch.ts
+index 1796c924b4a6b3221f4e6808a17f8fd767b79cdf..1e822d0c6e4e758e72d3ce6ee20714cb0eb27979 100644
+--- a/apps/web/src/components/settings/settingsSearch.ts
++++ b/apps/web/src/components/settings/settingsSearch.ts
+@@ -790,6 +790,13 @@ export const SETTINGS_SEARCH_ITEMS = [
+       "version control git github gitlab forgejo gitea tea codeberg bitbucket azure devops hosting integrations credentials scan server environment",
+     ],
+   },
++  {
++    id: "pull-request-creation",
++    title: "Pull request creation",
++    to: "/settings/source-control",
++    scope: "project-defaults",
++    searchTerms: ["disable hide pr merge request commit push feature branch"],
++  },
+   {
+     id: "git-fetch-interval",
+     title: "Git fetch interval",
+diff --git a/docs/user/source-control.md b/docs/user/source-control.md
+index 8a6bbdec8bf843a5080e7e200aef9674c0507a13..556023df366407e38564c1043c3def0449d20679 100644
+--- a/docs/user/source-control.md
++++ b/docs/user/source-control.md
+@@ -17,6 +17,13 @@ rebases, the files Git brought in are left out. A file stays in the list when th
+ committed it, or fixed a conflict in it. Use the branch comparison to review everything that changed
+ against your base branch. Restore still returns the complete saved workspace.
+ 
++## Commit and push without pull requests
++
++Turn off **Settings → Source Control → Pull request creation** to hide PR creation from source
++control actions. Feature branches then offer commit and push without creating a pull request.
++Select a project in Settings to override the environment default. Turn the setting back on to
++restore PR creation. Existing pull requests remain available for review.
++
+ ## Connect an account
+ 
+ Install Git and configure authentication on the machine running your T3 Code server. For a remote
+diff --git a/packages/client-runtime/src/state/gitActions.test.ts b/packages/client-runtime/src/state/gitActions.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..decfc05698d76f682de6cfa0443edc3f28da7de2
+--- /dev/null
++++ b/packages/client-runtime/src/state/gitActions.test.ts
+@@ -0,0 +1,78 @@
++import type { VcsStatusResult } from "@t3tools/contracts";
++import { describe, expect, it } from "vite-plus/test";
++import { buildMenuItems, resolveQuickAction } from "./gitActions.ts";
++
++function status(overrides: Partial<VcsStatusResult> = {}): VcsStatusResult {
++  return {
++    isRepo: true,
++    hasPrimaryRemote: true,
++    isDefaultRef: false,
++    refName: "feature/test",
++    hasWorkingTreeChanges: false,
++    workingTree: { files: [], insertions: 0, deletions: 0 },
++    hasUpstream: true,
++    aheadCount: 0,
++    behindCount: 0,
++    pr: null,
++    ...overrides,
++  };
++}
++
++describe("pull request creation preference", () => {
++  it("removes PR creation from the action menu", () => {
++    expect(buildMenuItems(status(), false, true, false).map((item) => item.label)).toEqual([
++      "Commit",
++      "Push",
++    ]);
++    expect(buildMenuItems(status(), false).map((item) => item.label)).toContain("Create PR");
++  });
++
++  it.each([true, false])("commits and pushes with hasUpstream=%s", (hasUpstream) => {
++    expect(
++      resolveQuickAction(
++        status({ hasWorkingTreeChanges: true, hasUpstream }),
++        false,
++        false,
++        true,
++        false,
++      ),
++    ).toEqual({
++      label: "Commit & push",
++      disabled: false,
++      kind: "run_action",
++      action: "commit_push",
++    });
++  });
++
++  it.each([true, false])("pushes without creating a PR with hasUpstream=%s", (hasUpstream) => {
++    expect(
++      resolveQuickAction(status({ aheadCount: 1, hasUpstream }), false, false, true, false),
++    ).toEqual({
++      label: "Push",
++      disabled: false,
++      kind: "run_action",
++      action: "push",
++    });
++  });
++
++  it("preserves access to existing pull requests", () => {
++    const gitStatus = status({
++      pr: {
++        number: 1,
++        title: "Existing PR",
++        url: "https://example.com/pull/1",
++        baseRef: "main",
++        headRef: "feature/test",
++        state: "open",
++      },
++    });
++    expect(buildMenuItems(gitStatus, false, true, false).at(-1)?.kind).toBe("open_pr");
++    expect(resolveQuickAction(gitStatus, false, false, true, false).kind).toBe("open_pr");
++  });
++
++  it("restores PR creation when enabled", () => {
++    expect(
++      resolveQuickAction(status({ hasWorkingTreeChanges: true }), false, false, true, true).action,
++    ).toBe("commit_push_pr");
++  });
++});
+diff --git a/packages/client-runtime/src/state/gitActions.ts b/packages/client-runtime/src/state/gitActions.ts
+index f708e9ca9b98c3f42bdaf98dc65d5b6328eedf69..ac115ba1a6e695c1edf9959c484df3e5895ae507 100644
+--- a/packages/client-runtime/src/state/gitActions.ts
++++ b/packages/client-runtime/src/state/gitActions.ts
+@@ -46,6 +46,7 @@ export function buildMenuItems(
+   gitStatus: VcsStatusResult | null,
+   isBusy: boolean,
+   hasOriginRemote = true,
++  pullRequestCreationEnabled = true,
+ ): GitActionMenuItem[] {
+   if (!gitStatus) return [];
+ 
+@@ -71,7 +72,7 @@ export function buildMenuItems(
+     (gitStatus.hasUpstream || canPushWithoutUpstream);
+   const canOpenPr = !isBusy && hasOpenPr;
+ 
+-  return [
++  const items: GitActionMenuItem[] = [
+     {
+       id: "commit",
+       label: "Commit",
+@@ -105,6 +106,9 @@ export function buildMenuItems(
+           dialogAction: "create_pr",
+         },
+   ];
++  return pullRequestCreationEnabled
++    ? items
++    : items.filter((item) => item.dialogAction !== "create_pr");
+ }
+ 
+ export function resolveQuickAction(
+@@ -112,6 +116,7 @@ export function resolveQuickAction(
+   isBusy: boolean,
+   isDefaultBranch = false,
+   hasOriginRemote = true,
++  pullRequestCreationEnabled = true,
+ ): GitQuickAction {
+   if (isBusy) {
+     return { label: "Commit", disabled: true, kind: "show_hint", hint: "Git action in progress." };
+@@ -146,7 +151,7 @@ export function resolveQuickAction(
+     if (!gitStatus.hasUpstream && !hasOriginRemote) {
+       return { label: "Commit", disabled: false, kind: "run_action", action: "commit" };
+     }
+-    if (hasOpenPr || isDefaultBranch) {
++    if (hasOpenPr || isDefaultBranch || !pullRequestCreationEnabled) {
+       return { label: "Commit & push", disabled: false, kind: "run_action", action: "commit_push" };
+     }
+     return {
+@@ -180,7 +185,7 @@ export function resolveQuickAction(
+         hint: "No local commits to push.",
+       };
+     }
+-    if (hasOpenPr || isDefaultBranch) {
++    if (hasOpenPr || isDefaultBranch || !pullRequestCreationEnabled) {
+       return {
+         label: "Push",
+         disabled: false,
+@@ -214,7 +219,7 @@ export function resolveQuickAction(
+   }
+ 
+   if (isAhead) {
+-    if (hasOpenPr || isDefaultBranch) {
++    if (hasOpenPr || isDefaultBranch || !pullRequestCreationEnabled) {
+       return {
+         label: "Push",
+         disabled: false,
+diff --git a/packages/client-runtime/src/state/server.test.ts b/packages/client-runtime/src/state/server.test.ts
+index bec8fb2b990f79f5ef2349db066b870901aa3289..de1c29eea660543866444b8473cc737968f307bc 100644
+--- a/packages/client-runtime/src/state/server.test.ts
++++ b/packages/client-runtime/src/state/server.test.ts
+@@ -1,11 +1,15 @@
+ import {
+   EnvironmentId,
++  DEFAULT_SERVER_SETTINGS,
++  ProjectId,
+   type ServerConfig,
+   type ServerConfigStreamEvent,
+   type ServerLifecycleWelcomePayload,
+   WS_METHODS,
+ } from "@t3tools/contracts";
+ import { describe, expect, it } from "@effect/vitest";
++import { Atom, AtomRegistry } from "effect/reactivity";
++import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
+ import * as Cause from "effect/Cause";
+ import * as Deferred from "effect/Deferred";
+ import * as Duration from "effect/Duration";
+@@ -33,6 +37,7 @@ import type { WsRpcProtocolClient } from "../rpc/protocol.ts";
+ import type { RpcSession } from "../rpc/session.ts";
+ import {
+   applyServerWelcomeEvent,
++  createLastKnownServerSettingsAtomFamily,
+   makeEnvironmentServerWelcomeState,
+   makeEnvironmentServerConfigState,
+   isLegacyUpdateHandoffLoss,
+@@ -919,3 +924,60 @@ describe("server state projection", () => {
+     }),
+   );
+ });
++
++describe("last known source control settings", () => {
++  it("retains each environment's project choices until a newer snapshot replaces them", () => {
++    const registry = AtomRegistry.make();
++    const configs = Atom.family((_id: EnvironmentId | null) =>
++      Atom.make<ServerConfig | null>(null),
++    );
++    const snapshots = createLastKnownServerSettingsAtomFamily(configs);
++    const first = EnvironmentId.make("first");
++    const second = EnvironmentId.make("second");
++    const project = ProjectId.make("project");
++    const firstSettings = {
++      ...DEFAULT_SERVER_SETTINGS,
++      projectSettingsOverrides: { [project]: { pullRequestCreationEnabled: false } },
++    };
++    const secondSettings = { ...DEFAULT_SERVER_SETTINGS, pullRequestCreationEnabled: false };
++    try {
++      expect(registry.get(snapshots(first))).toBeNull();
++      registry.set(configs(first), { ...CONFIG, settings: firstSettings });
++      expect(registry.get(snapshots(first))).toBe(firstSettings);
++      registry.set(configs(first), null);
++      const retained = registry.get(snapshots(first))!;
++      expect(resolveProjectSettings(retained, project).settings.pullRequestCreationEnabled).toBe(
++        false,
++      );
++      expect(resolveProjectSettings(retained, null).settings.pullRequestCreationEnabled).toBe(true);
++      expect(registry.get(snapshots(second))).toBeNull();
++      registry.set(configs(second), { ...CONFIG, settings: secondSettings });
++      expect(registry.get(snapshots(second))).toBe(secondSettings);
++      registry.set(configs(second), null);
++      expect(registry.get(snapshots(second))).toBe(secondSettings);
++      expect(registry.get(snapshots(first))).toBe(firstSettings);
++      const nextSettings = {
++        ...DEFAULT_SERVER_SETTINGS,
++        pullRequestCreationEnabled: false,
++        projectSettingsOverrides: { [project]: { pullRequestCreationEnabled: true } },
++      };
++      registry.set(configs(first), { ...CONFIG, settings: nextSettings });
++      expect(registry.get(snapshots(first))).toBe(nextSettings);
++      registry.set(configs(first), null);
++      expect(
++        resolveProjectSettings(registry.get(snapshots(first))!, project).settings
++          .pullRequestCreationEnabled,
++      ).toBe(true);
++      const resetSettings = { ...nextSettings, projectSettingsOverrides: {} };
++      registry.set(configs(first), { ...CONFIG, settings: resetSettings });
++      expect(registry.get(snapshots(first))).toBe(resetSettings);
++      registry.set(configs(first), null);
++      expect(
++        resolveProjectSettings(registry.get(snapshots(first))!, project).settings
++          .pullRequestCreationEnabled,
++      ).toBe(false);
++    } finally {
++      registry.dispose();
++    }
++  });
++});
+diff --git a/packages/client-runtime/src/state/server.ts b/packages/client-runtime/src/state/server.ts
+index d0cd59c56e968f7cb4a39cf3bb66184fa3c1c1f0..b3aa392bc563e86c8f8a445f80827c48149c5024 100644
+--- a/packages/client-runtime/src/state/server.ts
++++ b/packages/client-runtime/src/state/server.ts
+@@ -1,6 +1,7 @@
+ import {
+   type EnvironmentId,
+   type ServerConfig,
++  type ServerSettings,
+   type ServerConfigStreamEvent,
+   type ServerLifecycleWelcomePayload,
+   type ServerLifecycleStreamReadyEvent,
+@@ -599,6 +600,22 @@ export function resolveServerConfigValue(
+   return initialConfig ?? projection?.config ?? null;
+ }
+ 
++export function createLastKnownServerSettingsAtomFamily(
++  configValueAtom: (environmentId: EnvironmentId | null) => Atom.Atom<ServerConfig | null>,
++) {
++  return Atom.family((environmentId: EnvironmentId | null) =>
++    Atom.make(
++      (get) =>
++        get(configValueAtom(environmentId))?.settings ??
++        Option.getOrNull(get.self<ServerSettings | null>()),
++    ).pipe(
++      // Keep the last choice across reconnects even while no control is mounted.
++      Atom.keepAlive,
++      Atom.withLabel(`environment-data:server:last-known-settings:${environmentId}`),
++    ),
++  );
++}
++
+ export function createServerEnvironmentAtoms<R, E>(
+   runtime: Atom.AtomRuntime<
+     EnvironmentRegistry.EnvironmentRegistry | Persistence.EnvironmentCacheStore | R,
+@@ -891,6 +908,7 @@ export function createServerEnvironmentAtoms<R, E>(
+       );
+     },
+   });
++  const lastKnownSettingsValueAtom = createLastKnownServerSettingsAtomFamily(configValueAtom);
+   const settingsValueAtom = Atom.family((environmentId: EnvironmentId) =>
+     Atom.make((get) => get(configValueAtom(environmentId))?.settings ?? null).pipe(
+       Atom.withLabel(`environment-data:server:settings:${environmentId}`),
+@@ -982,6 +1000,7 @@ export function createServerEnvironmentAtoms<R, E>(
+     }),
+     updateStateAtom,
+     settingsValueAtom,
++    lastKnownSettingsValueAtom,
+     providersValueAtom,
+     providerAuthState: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
+       label: "environment-data:provider:auth-state",
+diff --git a/packages/contracts/src/settings.test.ts b/packages/contracts/src/settings.test.ts
+index 269c821ecdb337e155a40b0df7351615bf15937e..8f584e074e9c969eeac1ca1237150d39d0315bab 100644
+--- a/packages/contracts/src/settings.test.ts
++++ b/packages/contracts/src/settings.test.ts
+@@ -23,6 +23,24 @@ const decodeServerSettingsPatch = Schema.decodeUnknownSync(ServerSettingsPatch);
+ const encodeServerSettings = Schema.encodeSync(ServerSettings);
+ const decodeClaudeSettings = Schema.decodeUnknownSync(ClaudeSettings);
+ 
++describe("Pull request creation settings", () => {
++  it("keeps PR creation enabled for existing installations", () => {
++    expect(decodeServerSettings({}).pullRequestCreationEnabled).toBe(true);
++  });
++
++  it.each([true, false])(
++    "round-trips %s globally and per project",
++    (pullRequestCreationEnabled) => {
++      const input = {
++        pullRequestCreationEnabled,
++        projectSettingsOverrides: { project: { pullRequestCreationEnabled } },
++      };
++      expect(encodeServerSettings(decodeServerSettings(input))).toMatchObject(input);
++      expect(decodeServerSettingsPatch(input)).toEqual(input);
++    },
++  );
++});
++
+ describe("Changes scope settings", () => {
+   it("preserves branch changes for existing installations", () => {
+     expect(decodeServerSettings({}).changesScope).toBe("branch");
+diff --git a/packages/contracts/src/settings.ts b/packages/contracts/src/settings.ts
+index ba6ab52d586822b5d02c3f30de483fa9fd38c4f1..6e8088e455114c5e8545f2d2c97bb90b986d8931 100644
+--- a/packages/contracts/src/settings.ts
++++ b/packages/contracts/src/settings.ts
+@@ -894,6 +894,7 @@ export const PROJECT_SCOPED_SERVER_SETTING_KEYS = [
+   "reviewGuideModelSelection",
+   "reviewGuideInstructions",
+   "sourceControlWritingStyle",
++  "pullRequestCreationEnabled",
+   "removeAgentCreditsOnMerge",
+   "branchNamingMode",
+   "branchNamePrefix",
+@@ -938,6 +939,7 @@ export const ProjectSettingsOverrides = Schema.Struct({
+   reviewGuideModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelection)),
+   reviewGuideInstructions: Schema.optionalKey(TrimmedString),
+   sourceControlWritingStyle: Schema.optionalKey(SourceControlWritingStyleSettings),
++  pullRequestCreationEnabled: Schema.optionalKey(Schema.Boolean),
+   removeAgentCreditsOnMerge: Schema.optionalKey(Schema.Boolean),
+   branchNamingMode: Schema.optionalKey(BranchNamingMode),
+   branchNamePrefix: Schema.optionalKey(TrimmedString),
+@@ -1177,6 +1179,7 @@ export const ServerSettings = Schema.Struct({
+   ),
+   branchNamePrefix: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed("t3"))),
+   branchNameInstructions: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
++  pullRequestCreationEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+   removeAgentCreditsOnMerge: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+   sourceControlWritingStyle: SourceControlWritingStyleSettings.pipe(
+     Schema.withDecodingDefault(Effect.succeed({})),
+@@ -1438,6 +1441,7 @@ export const ServerSettingsPatch = Schema.Struct({
+   branchNamingMode: Schema.optionalKey(BranchNamingMode),
+   branchNamePrefix: Schema.optionalKey(TrimmedString),
+   branchNameInstructions: Schema.optionalKey(TrimmedString),
++  pullRequestCreationEnabled: Schema.optionalKey(Schema.Boolean),
+   removeAgentCreditsOnMerge: Schema.optionalKey(Schema.Boolean),
+   sourceControlWritingStyle: Schema.optionalKey(
+     Schema.Struct({
+diff --git a/packages/shared/src/projectSettings.test.ts b/packages/shared/src/projectSettings.test.ts
+index b458ef71af412de997853dc10a285fea556c1ab0..cbd52b3d605db16201e314b301af558146f20aa1 100644
+--- a/packages/shared/src/projectSettings.test.ts
++++ b/packages/shared/src/projectSettings.test.ts
+@@ -22,6 +22,32 @@ const projectId = ProjectId.make("project-a");
+ const otherProjectId = ProjectId.make("project-b");
+ 
+ describe("resolveProjectSettings", () => {
++  it("inherits PR creation and restores it when a project override is cleared", () => {
++    const settings = applyServerSettingsPatch(DEFAULT_SERVER_SETTINGS, {
++      pullRequestCreationEnabled: false,
++      projectSettingsOverrides: { [projectId]: { pullRequestCreationEnabled: true } },
++    });
++    expect(resolveProjectSettings(settings, projectId).settings.pullRequestCreationEnabled).toBe(
++      true,
++    );
++    expect(
++      resolveProjectSettings(settings, otherProjectId).settings.pullRequestCreationEnabled,
++    ).toBe(false);
++    const cleared = applyServerSettingsPatch(settings, {
++      projectSettingsOverrides: {
++        [projectId]: clearProjectSettingsOverrides(settings, projectId, [
++          "pullRequestCreationEnabled",
++        ]),
++      },
++    });
++    expect(resolveProjectSettings(cleared, projectId).settings.pullRequestCreationEnabled).toBe(
++      false,
++    );
++    expect(resolveProjectSettings(cleared, projectId).sources.pullRequestCreationEnabled).toBe(
++      "environment",
++    );
++  });
++
+   it("inherits the changes scope and restores inheritance when a project override is cleared", () => {
+     const settings = applyServerSettingsPatch(DEFAULT_SERVER_SETTINGS, {
+       changesScope: "uncommitted",

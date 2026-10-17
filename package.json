@@ -1,0 +1,9 @@
+{
+  "name": "t3code-local-patch-kit",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=24" },
+  "scripts": { "test": "node --test patch-lib.test.mjs" },
+  "dependencies": { "@electron/asar": "4.3.0" }
+}
