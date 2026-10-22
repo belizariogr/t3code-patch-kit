@@ -7,7 +7,7 @@ O mesmo `./apply.sh` detecta o sistema operacional e escolhe o perfil. Cada perf
 | Sistema | Instalação padrão | Versão / commit | Payload |
 | --- | --- | --- | --- |
 | macOS arm64 | `/Applications/T3 Code (Beta).app` | `0.1.0-disable-pr-creation.20261016` / `66c4f1b87b99` | `target.json`, `payload.tar.gz`: somente cliente web |
-| Linux x64 | `/usr/lib/t3code` | `0.1.0` / `81493efb71e8` | `linux/target.json`, `linux/payload.tar.gz`: cliente web e servidor |
+| Linux x64 | `/usr/lib/t3code` | `0.1.1` / `fe27e8e3dc12` | `linux/target.json`, `linux/payload.tar.gz`: cliente web e servidor |
 
 O perfil macOS original foi preservado. O perfil Linux foi compilado sobre o commit exato instalado, pois essa release oficial ainda não contém os contratos das duas preferências. O executável Electron e suas dependências nativas permanecem os da instalação.
 

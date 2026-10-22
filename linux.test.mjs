@@ -66,7 +66,7 @@ test('real Linux installation: output, CLI, full ASAR comparison, apply, repeat,
     for (const [name, digest] of Object.entries(target.changedFiles)) assert.equal(createHash('sha256').update(asar.extractFile(patchedArchive, name)).digest('hex'), digest, name);
     const cliEnv = { ...process.env, ELECTRON_RUN_AS_NODE: '1', T3CODE_HOME: path.join(temp, 'cli-state') };
     delete cliEnv.ELECTRON_NO_ASAR;
-    assert.equal(run(path.join(output, 't3code'), [path.join(patchedArchive, 'apps/server/dist/bin.mjs'), '--version'], cliEnv).trim(), 't3 v0.1.0');
+    assert.equal(run(path.join(output, 't3code'), [path.join(patchedArchive, 'apps/server/dist/bin.mjs'), '--version'], cliEnv).trim(), `t3 v${target.version}`);
     const testApp = path.join(temp, 'installed'); await copyLinuxInstallation(app, testApp, target.originalFiles);
     apply(['--app', testApp]);
     const markerFile = path.join(testApp, 'resources/t3code-local-patch.json');

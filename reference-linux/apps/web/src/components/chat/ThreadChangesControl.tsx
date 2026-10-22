@@ -88,8 +88,8 @@ export function ThreadChangesControl({
       >
         {totals ? (
           <>
-            <span className="text-success">+{formatDiffCount(totals.insertions)}</span>
-            <span className="text-destructive">-{formatDiffCount(totals.deletions)}</span>
+            <span className="text-diff-addition">+{formatDiffCount(totals.insertions)}</span>
+            <span className="text-diff-deletion">-{formatDiffCount(totals.deletions)}</span>
           </>
         ) : (
           <span className="text-muted-foreground">

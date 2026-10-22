@@ -34,7 +34,7 @@ const resolved = git(['rev-parse', '--verify', `${commit}^{commit}`], repo, true
 if (resolved.status !== 0) throw new Error(`Commit ${commit} ausente no fork. Busque a tag/commit da release oficial e execute novamente; não use o HEAD como substituto.`);
 commit = resolved.stdout.trim();
 const ancestor = (base) => git(['merge-base', '--is-ancestor', base, commit], repo, true).status === 0;
-const profile = args.profile ?? (ancestor(manifest.upstreamBase) ? 'modern' : ancestor(manifest.legacyBase) ? 'legacy' : manifest.linux && ancestor(manifest.linux.upstreamBase) ? 'linux' : null);
+const profile = args.profile ?? (manifest.linux && ancestor(manifest.linux.upstreamBase) ? 'linux' : ancestor(manifest.upstreamBase) ? 'modern' : ancestor(manifest.legacyBase) ? 'legacy' : null);
 if (!['modern', 'legacy', 'linux'].includes(profile)) throw new Error('A release não corresponde às bases conhecidas. Porte as mudanças para o commit exato; não use main como substituto.');
 if (profile === 'legacy' && !ancestor(manifest.legacyBase)) throw new Error('A versão antecede as bases do kit. É necessário portar as duas mudanças manualmente.');
 const patches = profile === 'linux' ? ['linux-customizations.patch'] : profile === 'modern' ? ['customizations.patch'] : [

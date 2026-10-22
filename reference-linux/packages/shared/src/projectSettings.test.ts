@@ -22,6 +22,23 @@ const projectId = ProjectId.make("project-a");
 const otherProjectId = ProjectId.make("project-b");
 
 describe("resolveProjectSettings", () => {
+  it("inherits the changes scope and restores inheritance when a project override is cleared", () => {
+    const settings = applyServerSettingsPatch(DEFAULT_SERVER_SETTINGS, {
+      changesScope: "uncommitted",
+      projectSettingsOverrides: { [projectId]: { changesScope: "thread" } },
+    });
+    expect(resolveProjectSettings(settings, projectId).settings.changesScope).toBe("thread");
+    expect(resolveProjectSettings(settings, otherProjectId).settings.changesScope).toBe(
+      "uncommitted",
+    );
+    const cleared = applyServerSettingsPatch(settings, {
+      projectSettingsOverrides: {
+        [projectId]: clearProjectSettingsOverrides(settings, projectId, ["changesScope"]),
+      },
+    });
+    expect(resolveProjectSettings(cleared, projectId).settings.changesScope).toBe("uncommitted");
+    expect(resolveProjectSettings(cleared, projectId).sources.changesScope).toBe("environment");
+  });
   it("inherits PR creation and restores it when a project override is cleared", () => {
     const settings = applyServerSettingsPatch(DEFAULT_SERVER_SETTINGS, {
       pullRequestCreationEnabled: false,
@@ -48,23 +65,6 @@ describe("resolveProjectSettings", () => {
     );
   });
 
-  it("inherits the changes scope and restores inheritance when a project override is cleared", () => {
-    const settings = applyServerSettingsPatch(DEFAULT_SERVER_SETTINGS, {
-      changesScope: "uncommitted",
-      projectSettingsOverrides: { [projectId]: { changesScope: "thread" } },
-    });
-    expect(resolveProjectSettings(settings, projectId).settings.changesScope).toBe("thread");
-    expect(resolveProjectSettings(settings, otherProjectId).settings.changesScope).toBe(
-      "uncommitted",
-    );
-    const cleared = applyServerSettingsPatch(settings, {
-      projectSettingsOverrides: {
-        [projectId]: clearProjectSettingsOverrides(settings, projectId, ["changesScope"]),
-      },
-    });
-    expect(resolveProjectSettings(cleared, projectId).settings.changesScope).toBe("uncommitted");
-    expect(resolveProjectSettings(cleared, projectId).sources.changesScope).toBe("environment");
-  });
   it("inherits every scopable key when the project has no overrides", () => {
     const resolved = resolveProjectSettings(DEFAULT_SERVER_SETTINGS, projectId);
     expect(resolved.settings).toBe(DEFAULT_SERVER_SETTINGS);
@@ -95,8 +95,6 @@ describe("resolveProjectSettings", () => {
   });
 
   it("treats a null project like an absent one before the shell snapshot arrives", () => {
-    // The mobile new-task flow resolves settings while its selected project is
-    // still null; reading the aggregate's legacy fields off null crashed launch.
     expect(resolveProjectSettings(DEFAULT_SERVER_SETTINGS, null, null).settings).toBe(
       DEFAULT_SERVER_SETTINGS,
     );
@@ -154,7 +152,6 @@ describe("resolveProjectSettings", () => {
     expect(unfolded.settings.defaultModelSelection).toEqual(aggregateModel);
     expect(unfolded.settings.defaultThreadEnvMode).toBe("local");
     expect(unfolded.sources.defaultModelSelection).toBe("project");
-    // A stored override still beats the aggregate before the fold.
     const overridden = resolveProjectSettings(
       {
         ...DEFAULT_SERVER_SETTINGS,
@@ -165,7 +162,6 @@ describe("resolveProjectSettings", () => {
       project,
     );
     expect(overridden.settings.defaultThreadEnvMode).toBe("worktree");
-    // After the fold a reset in the record wins over the stale aggregate.
     const folded = resolveProjectSettings(
       { ...DEFAULT_SERVER_SETTINGS, projectSettingsFolded: true },
       projectId,
@@ -261,8 +257,6 @@ describe("resolveProjectSettings with a t3.json", () => {
     const builtIn = resolveProjectSettings(DEFAULT_SERVER_SETTINGS, projectId, null, null);
     expect(builtIn.settings.defaultThreadEnvMode).toBe("local");
     expect(builtIn.sources.defaultThreadEnvMode).toBe("environment");
-    // A stored null override defers like an unset one and is not reported
-    // as the project's value.
     const nullOverride = resolveProjectSettings(
       {
         ...DEFAULT_SERVER_SETTINGS,
@@ -274,7 +268,6 @@ describe("resolveProjectSettings with a t3.json", () => {
     );
     expect(nullOverride.settings.defaultThreadEnvMode).toBe("worktree");
     expect(nullOverride.sources.defaultThreadEnvMode).toBe("t3.json");
-    // A file that does not mention the key leaves the source alone too.
     expect(
       resolveProjectSettings(DEFAULT_SERVER_SETTINGS, projectId, null, {}).sources
         .defaultThreadEnvMode,
@@ -424,8 +417,6 @@ describe("projectSettingsOverrides patches", () => {
     const current = applyServerSettingsPatch(DEFAULT_SERVER_SETTINGS, {
       projectSettingsOverrides: { [projectId]: { defaultAutoPull: true } },
     });
-    // The canonical entry omits defaultAutoPull to clear it; the stale legacy
-    // map in the same patch must not put it back.
     const next = applyServerSettingsPatch(current, {
       projectSettingsOverrides: { [projectId]: { defaultThreadEnvMode: "local" } },
       projectAutoPullOverrides: { [projectId]: true, [otherProjectId]: false },

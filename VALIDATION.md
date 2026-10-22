@@ -1,5 +1,63 @@
 # Validações — macOS e Linux
 
+## Port e validação Linux 0.1.1 — 22/10/2026
+
+**O kit foi corrigido para a versão nova. A aplicação real foi tentada, mas o instalador recusou a troca porque o T3 Code hospedeiro estava aberto (PID `803980`). A instalação em uso continua original; o novo payload está pronto para aplicação pelo Terminal externo após fechar o app.**
+
+### Alvo e fontes
+
+- Linux x64, `/usr/lib/t3code/t3code`, pacote `t3code-bin 0.1.1-1`; metadados ASAR `version/buildVersion: 0.1.1`, commit `fe27e8e3dc12`, resolvido localmente como `fe27e8e3dc12dcbb108e9a28fd9b8cb65f34ae92`.
+- ASAR original SHA-256: `c6ce4e97c52eb4c2584da05497309befa99d1b6e861c7f158b2e4736d55a3194`.
+- Fontes portadas no worktree `/home/belizario/dev/t3code-patch-build-0.1.1`. Preservadas as refatorações da release: abertura automática em `useProactivePanels`, `useQuietThreadShell`, estado de carregamento do diff, tokens visuais de diff e testes de interface em Chromium.
+- `patches/linux-customizations.patch`, manifest e 30 snapshots Linux atualizados. Preparação automática reproduzida em outro worktree, perfil `linux`, sem conflitos; os 30 arquivos coincidiram com os snapshots. O preparador prioriza a base Linux antes de modern quando ambas são ancestrais.
+- O kit anterior, incluindo o payload 0.1.0, foi preservado em `backups/kit-before-linux-0.1.1-20261022.tar.gz`. Os backups anteriores do aplicativo permanecem preservados.
+
+### Testes e compilação
+
+- Dependências da release exata instaladas com `pnpm@11.10.0` e lockfile congelado, usando o Node `26.12.0` existente, sem alteração global.
+- **496 testes de fonte passaram em 13 arquivos**: 440 testes em 10 arquivos de lógica/contratos/runtime/configurações/servidor/dependências externas, 20 testes de ações Git mobile, 4 testes React mobile no projeto `react` do pacote e **32 testes do controle Git em Chromium headless**. A execução headless foi expressamente autorizada pela pessoa nesta conversa.
+- Os testes browser verificaram, além do comportamento oficial, PRs desabilitados antes/depois de uma ação pendente, cliques em toasts retidos após trocar de conversa, preferências globais e por projeto, recarga de configuração, estado sem configuração inicial, push e links de PRs existentes.
+- Typecheck web e servidor passaram, com sugestões Effect em código upstream. Lint focado de 10 arquivos concluiu sem erros ou avisos. Não foram rodados checks do monorepo inteiro.
+- Web e servidor compilados da mesma release, com versão `0.1.1`. Defaults públicos de Clerk, JWT, OAuth, relay e tracing foram recuperados do ASAR original, preservados nos bundles novos e conferidos sem registrar seus valores. Não foram copiadas credenciais ou `.env` do checkout principal nem fixadas origens HTTP/WS.
+- Conjunto de **100 especificadores externos** do servidor permaneceu igual, sem adições ou remoções. Nenhuma dependência instalada ou binário nativo foi substituído.
+
+### Payload, aplicação em cópia e tentativa real
+
+- `linux/payload.tar.gz`: **10.700.233 bytes**, SHA-256 `7a5b60a18b3132ca1ba594922f4aef56fbbbddd9f4426bf7b66e7d8d89453cf2`.
+- **758 arquivos novos/alterados**: 756 arquivos web e 2 chunks de servidor. **259 remoções**: 258 arquivos web e 1 chunk antigo de servidor. Favicons/manifest originais preservados.
+- **7 testes do kit passaram**, com `T3CODE_LINUX_INTEGRATION_APP=/usr/lib/t3code node --test patch-lib.test.mjs linux.test.mjs`. A integração criou cópias para testar `--output`, `--check`, comparação completa de ASAR, CLI, aplicar, repetir sem outro backup, restaurar e recusar um ASAR alterado.
+- **1.314 arquivos originais do ASAR mantidos idênticos**; os 758 arquivos do payload foram conferidos por SHA-256. Flags unpacked e remoções conferidas. Os **79 arquivos externos ao ASAR**, incluindo **39 arquivos unpacked**, foram preservados com seus hashes, links e modos, inclusive `chrome-sandbox` `4755`.
+- CLI original e CLI da cópia responderam `t3 v0.1.1`, exit code 0, com `T3CODE_HOME` temporário, sem iniciar servidor ou abrir a sessão real do app.
+- Fuses do Electron original lidos: `RunAsNode` habilitado, `EnableEmbeddedAsarIntegrityValidation` e `OnlyLoadAppFromAsar` desabilitados. Nenhum fuse ou executável foi alterado.
+- Backup do último ciclo de teste preservado em `backups/linux/2026-10-22T15-29-14.545Z/installed`; as cópias temporárias desse ciclo foram removidas. Não é um backup de aplicação na instalação real.
+- `./apply.sh --check` reconheceu a instalação real como compatível. A tentativa `./apply.sh` encerrou com exit code 1 e pediu para fechar o T3 Code no PID `803980`, antes de copiar/trocar a instalação. O SHA-256 real permaneceu igual ao original. Não houve aplicação com sudo.
+- Payload, fingerprints, fontes de referência e instalador macOS preservados. O target macOS mantém SHA-256 `1b4c3701d23f45b41a98728957be6bc1eb4089c5cf5c9f94e647f542bdfefe1c`; seu payload mantém `f62b6f535176cc5ccc663f93af36db66b9f7058a61218920043afc23d94f55e8`. Não houve nova execução macOS ou codesign.
+
+Para concluir a instalação real, fechar o T3 Code e executar em Terminal externo:
+
+```sh
+cd /home/belizario/dev/t3code-patch-kit
+sudo env "PATH=$PATH" ./apply.sh
+```
+
+O script criará um novo backup da versão 0.1.1 antes da troca. Mantenha esse backup até confirmar o funcionamento. Não houve abertura da UI real, alteração de dados de usuário ou encerramento de processos do aplicativo; apenas os processos isolados dos testes foram iniciados/encerrados.
+
+## Verificação após atualização — 22/10/2026
+
+**Resultado: o payload Linux atual do kit não é compatível com a instalação atualizada. A instalação não foi modificada e nenhum payload novo foi gerado nesta verificação.**
+
+- Executável em uso: `/usr/lib/t3code/t3code`, Linux x64; pacote instalado `t3code-bin 0.1.1-1`.
+- Metadados lidos diretamente de `resources/app.asar`: `version/buildVersion: 0.1.1`, commit `fe27e8e3dc12`.
+- SHA-256 do ASAR atualizado: `c6ce4e97c52eb4c2584da05497309befa99d1b6e861c7f158b2e4736d55a3194`. O perfil Linux do kit continua destinado à release `0.1.0`, commit `81493efb71e8`, ASAR original `54e2346258da31c28761984a0cca48bba5de4918e506ce65e340c2a28d000c16`.
+- `./apply.sh --check` recusou corretamente a instalação, com exit code 1 e mensagem de que a instalação mudou.
+- O marcador `resources/t3code-local-patch.json` da aplicação anterior permanece no diretório, mas seu hash de ASAR alterado não corresponde ao ASAR atual. O instalador não o aceitou como prova de que o patch está aplicado. O backup indicado pelo marcador foi preservado.
+- Inspeção de todos os chunks `.mjs` no nível imediato de `apps/server/dist/`: não há `changesScope` nem `pullRequestCreationEnabled`. Será necessário portar as personalizações e reconstruir também o servidor da release exata antes de gerar um payload compatível.
+- A conferência dos arquivos externos ao ASAR também encontrou diferenças: `node-pty/lib/windowsPtyAgent.js`, arquivos da extensão GNOME e o helper `hyprland-capture/t3-hyprland-snap-shot`, entre outros. Não basta trocar a versão ou o fingerprint do ASAR no target antigo.
+- `node --test patch-lib.test.mjs linux.test.mjs`: **6 testes passaram, 1 integração foi pulada** por não ter sido solicitado o teste real com `T3CODE_LINUX_INTEGRATION_APP`. O ciclo de aplicação/restauração não foi executado na release incompatível.
+- Todos os **115 checksums** registrados no kit foram conferidos antes da edição deste registro. O payload e os fingerprints macOS continuam iguais aos da validação anterior; os arquivos de ambos os payloads não foram alterados.
+
+Escopo desta sessão: identificação e validação de compatibilidade. Não houve portabilidade das fontes para `0.1.1`, build, aplicação/restauração, abertura de UI, início de servidor ou alteração de dados de usuário. Para adaptar, siga o procedimento de atualização em AGENTS.md, preservando o perfil macOS.
+
 ## Linux — 17/10/2026, executado nesta máquina
 
 Alvo original em uso: `/usr/lib/t3code/t3code`, Linux x64, pacote `t3code-bin 0.1.0-1`. Metadados ASAR `version/buildVersion: 0.1.0`, commit `81493efb71e8`, resolvido no upstream como `81493efb71e8e8244f95d3e9f71d8369654ab151`. Fontes preparadas em `/tmp/t3code-linux-build`, sem servidores ou UI.

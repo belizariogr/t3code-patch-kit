@@ -23,11 +23,11 @@ Isto controla ações de criação da interface. Não promete impedir ferramenta
 ## Perfis e proveniência
 
 - **macOS arm64**: `/Applications/T3 Code (Beta).app`, versão `0.1.0-disable-pr-creation.20261016`, commit `66c4f1b87b99`. `target.json` e `payload.tar.gz` na raiz são o perfil original, preservado. O servidor instalado já contém os contratos; o payload altera somente `apps/server/dist/client/`.
-- **Linux x64**: `/usr/lib/t3code/t3code`, pacote Arch `t3code-bin 0.1.0-1`, versão ASAR `0.1.0`, commit exato `81493efb71e8e8244f95d3e9f71d8369654ab151`. `linux/target.json` e `linux/payload.tar.gz` são independentes. A release não tinha os contratos; o payload inclui cliente e os chunks `.mjs` necessários do servidor da mesma release. Electron, pacote raiz, IPC desktop, dependências e binários nativos são preservados.
+- **Linux x64**: `/usr/lib/t3code/t3code`, pacote Arch `t3code-bin 0.1.1-1`, versão ASAR `0.1.1`, commit exato `fe27e8e3dc12dcbb108e9a28fd9b8cb65f34ae92`. `linux/target.json` e `linux/payload.tar.gz` são independentes. A release não tinha os contratos; o payload inclui cliente e os chunks `.mjs` necessários do servidor da mesma release. Electron, pacote raiz, IPC desktop, dependências e binários nativos são preservados.
 - `manifest.json` registra a base upstream moderna `2fae0f9841448e6edb93d0ebe4cbaf2d546bb38c` e a integração final do fork `7fb09a2af59d1e33d3535d29315cc392d97132e6`, merge seguido da adaptação ao React Compiler.
 - `patches/customizations.patch` contém somente as duas funcionalidades em relação à base moderna, sem as centenas de mudanças upstream do merge.
 - O perfil `legacy` aplica `legacy-changes.patch` sobre `3b99fb2d2` e `legacy-pr-creation.patch` sobre `66c4f1b87`. O segundo contém a criação de PRs, suas três correções posteriores e a importação do default de Changes necessária à base antiga. O preparador pula Changes quando o commit já o contém.
-- O perfil `linux` aplica `patches/linux-customizations.patch` sobre `81493efb71e8`, com a adaptação dos conflitos à release oficial, preservação da abertura automática de Changes em `ChatView` e adaptação do controle novo ao React Compiler. Inclui teste de persistência/broadcast das configurações no servidor.
+- O perfil `linux` aplica `patches/linux-customizations.patch` sobre `fe27e8e3dc12`, com adaptação dos conflitos à release oficial, preservação da abertura explícita em `ChatView` e automática em `useProactivePanels`, do shell de thread silencioso e do estado de carregamento do diff. O controle novo mantém os tokens visuais de diff da release e é compatível com o React Compiler. Inclui teste de persistência/broadcast no servidor e 32 testes do controle Git em Chromium headless. O perfil Linux tem prioridade por ancestralidade antes de modern; a release Linux atual também descende da base modern.
 - `reference-installed-version/`: fontes do payload macOS. `reference/`: integração moderna. `reference-linux/`: fontes do payload Linux. Use como referência para conflitos; **não substitua arquivos inteiros de uma release futura**, pois isso reverteria atualizações oficiais.
 
 ## Aplicação pronta
@@ -61,10 +61,10 @@ O validador de payload permite cliente web e, **somente quando explicitamente li
 Pré-requisitos: Git, Node 24+ e dependências da release exata. Se o checkout não existir, clone `https://github.com/pingdotgg/t3code` e resolva o commit extraído do ASAR; não use `main` como substituto.
 
 ```sh
-node prepare-source.mjs --app /usr/lib/t3code --output /tmp/t3code-linux-build
+node prepare-source.mjs --app /usr/lib/t3code --output /home/belizario/dev/t3code-patch-build-0.1.1
 ```
 
-O preparador cria um worktree isolado e registra `/tmp/t3code-linux-build.patch-context.json`. `--repo` escolhe o repositório, `--commit SHA` prepara só as fontes, `--profile linux|legacy|modern` escolhe explicitamente o delta. Merge de três vias preserva conflitos e encerra com erro; resolva-os antes de continuar. O preparador não instala dependências nem inicia servidor.
+O preparador cria um worktree isolado e registra `/home/belizario/dev/t3code-patch-build-0.1.1.patch-context.json`. `--repo` escolhe o repositório, `--commit SHA` prepara só as fontes, `--profile linux|legacy|modern` escolhe explicitamente o delta. Merge de três vias preserva conflitos e encerra com erro; resolva-os antes de continuar. Se um patch referencia testes removidos ou renomeados, o Git pode recusar a aplicação inteira: porte esses testes ao mecanismo da release, sem recriar dependências ou ambientes de teste obsoletos. O preparador não instala dependências nem inicia servidor.
 
 No worktree, instale sem atualizar o lockfile. Use `vp install --frozen-lockfile` se disponível; nesta máquina foi usado o gerenciador exato sem instalação global:
 
@@ -72,16 +72,21 @@ No worktree, instale sem atualizar o lockfile. Use `vp install --frozen-lockfile
 npm exec --yes --package=pnpm@11.10.0 -- pnpm install --frozen-lockfile
 ./node_modules/.bin/vp run --filter @t3tools/web typecheck
 ./node_modules/.bin/vp run --filter t3 typecheck
-./node_modules/.bin/vp test run apps/web/src/components/GitActionsControl.lifecycle.test.ts apps/web/src/components/GitActionsControl.logic.test.ts apps/web/src/components/GitActionsControl.test.ts apps/web/src/diffPanelStore.test.ts apps/web/src/components/settings/scopedSettings.test.ts packages/contracts/src/settings.test.ts packages/shared/src/projectSettings.test.ts packages/client-runtime/src/state/server.test.ts packages/client-runtime/src/state/gitActions.test.ts packages/client-runtime/src/state/threadCheckpoints.test.ts apps/server/src/serverSettings.test.ts scripts/lib/cli-external-packages.test.ts
+./node_modules/.bin/vp test run apps/web/src/components/GitActionsControl.logic.test.ts apps/web/src/diffPanelStore.test.ts apps/web/src/components/settings/scopedSettings.test.ts packages/contracts/src/settings.test.ts packages/shared/src/projectSettings.test.ts packages/client-runtime/src/state/server.test.ts packages/client-runtime/src/state/gitActions.test.ts packages/client-runtime/src/state/threadCheckpoints.test.ts apps/server/src/serverSettings.test.ts scripts/lib/cli-external-packages.test.ts
+# Testes nativos React são selecionados pela configuração do pacote mobile.
+(cd apps/mobile && ../../node_modules/.bin/vp test run --project unit src/state/use-selected-thread-git-actions.test.ts)
+(cd apps/mobile && ../../node_modules/.bin/vp test run --project react src/state/use-selected-thread-git-actions.test.tsx)
+# Executar apenas com autorização de navegador headless; obtida nesta adaptação.
+(cd apps/web && ../../node_modules/.bin/vp test run --project browser src/components/GitActionsControl.browser.test.tsx)
 ```
 
 De volta ao kit, usando **a instalação original ou seu backup original**:
 
 ```sh
-node build-linux.mjs --source /tmp/t3code-linux-build --app /usr/lib/t3code
+node build-linux.mjs --source /home/belizario/dev/t3code-patch-build-0.1.1 --app /usr/lib/t3code
 node build-payload.mjs --app /usr/lib/t3code \
-  --web-dist /tmp/t3code-linux-build/apps/web/dist \
-  --server-dist /tmp/t3code-linux-build/apps/server/dist
+  --web-dist /home/belizario/dev/t3code-patch-build-0.1.1/apps/web/dist \
+  --server-dist /home/belizario/dev/t3code-patch-build-0.1.1/apps/server/dist
 node --test patch-lib.test.mjs linux.test.mjs
 T3CODE_LINUX_INTEGRATION_APP=/usr/lib/t3code node --test linux.test.mjs
 ./apply.sh --check
@@ -90,7 +95,7 @@ T3CODE_LINUX_INTEGRATION_APP=/usr/lib/t3code node --test linux.test.mjs
 
 `build-linux.mjs` confere o HEAD exato, recusa `.env`/`.env.local` no worktree, recupera os defaults públicos dos bundles originais (Clerk, JWT, OAuth, relay e tracing), omite os valores do log e compila só web e servidor. Ajusta temporariamente a versão do package servidor e restaura esse arquivo ao terminar. Não define origens HTTP/WS. O extrator usa a sintaxe desta release; outra sintaxe deve falhar e exigir adaptação, nunca produzir valores vazios silenciosamente.
 
-`build-payload.mjs` grava **somente `linux/`** nesse fluxo, inclui arquivos novos/diferentes e registra remoções de chunks antigos. Preserva favicons/manifest da instalação. Mapas de fonte do servidor não entram no payload. Confira dependências externas/nativas antes de combinar bundles: no alvo atual os 97 especificadores externos originais/reconstruídos são iguais e os arquivos nativos originais foram preservados.
+`build-payload.mjs` grava **somente `linux/`** nesse fluxo, inclui arquivos novos/diferentes e registra remoções de chunks antigos. Preserva favicons/manifest da instalação. Mapas de fonte do servidor não entram no payload. Confira dependências externas/nativas antes de combinar bundles: no alvo atual os 100 especificadores externos originais/reconstruídos são iguais e os arquivos nativos originais foram preservados.
 
 ## Reconstruir o macOS original
 
@@ -100,7 +105,7 @@ Execute no Mac, preservando os defaults públicos **em branco somente neste alvo
 node prepare-source.mjs --output /tmp/t3code-patch-build
 ```
 
-No worktree, instale as dependências exatas, rode typecheck web e os testes focados listados acima que existam na release. Depois:
+No worktree, instale as dependências exatas e rode typecheck web. No perfil macOS antigo, os testes do controle Git ainda são `GitActionsControl.lifecycle.test.ts`, `GitActionsControl.logic.test.ts` e `GitActionsControl.test.ts`; não use o teste browser da release Linux como substituto. Rode também os testes focados de contratos, runtime e diffPanelStore presentes nessa release. Depois:
 
 ```sh
 APP_VERSION=0.1.0-disable-pr-creation.20261016 T3CODE_WEB_SOURCEMAP=0 \
@@ -117,7 +122,7 @@ node --test patch-lib.test.mjs linux.test.mjs
 ./apply.sh --output '/tmp/T3 Code (Patch Rebuild Test).app'
 ```
 
-Esse fluxo grava `target.json`/`payload.tar.gz` na raiz e não altera `linux/`. Guarde uma cópia do kit antes de regenerar qualquer payload.
+Esse fluxo grava `target.json`/`payload.tar.gz` na raiz e não altera `linux/`. Guarde uma cópia do kit antes de regenerar qualquer payload. A versão Linux anterior deste kit foi preservada em `backups/kit-before-linux-0.1.1-20261022.tar.gz`; não use os backups do aplicativo 0.1.0 para restaurar por cima da release 0.1.1.
 
 ## Adaptar depois de uma atualização oficial
 
@@ -145,6 +150,8 @@ ELECTRON_RUN_AS_NODE=1 T3CODE_HOME=/tmp/t3code-patch-cli-state \
   '/tmp/T3 Code (Patch Rebuild Test).app/Contents/MacOS/T3 Code (Beta)' \
   '/tmp/T3 Code (Patch Rebuild Test).app/Contents/Resources/app.asar/apps/server/dist/bin.mjs' --version
 ```
+
+A CLI Linux atual deve responder `t3 v0.1.1`; compare sempre com a CLI original em vez de fixar a versão anterior no teste.
 
 **Não use `ELECTRON_NO_ASAR=1` nessas chamadas CLI**, pois o entrypoint está dentro do ASAR.
 
