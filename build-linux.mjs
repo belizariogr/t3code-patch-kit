@@ -7,12 +7,13 @@ import { loadAsar } from './patch-lib.mjs';
 
 const args = {};
 for (let i = 2; i < process.argv.length; i += 2) {
-  if (!['--source', '--app'].includes(process.argv[i]) || !process.argv[i + 1]) throw new Error('Uso: node build-linux.mjs --source /worktree [--app /usr/lib/t3code]');
+  if (!['--source', '--app'].includes(process.argv[i]) || !process.argv[i + 1]) throw new Error('Uso: node build-linux.mjs --source /worktree [--app /caminho/do/app]');
   args[process.argv[i].slice(2)] = path.resolve(process.argv[i + 1]);
 }
 if (!args.source) throw new Error('Informe --source.');
 const asar = await loadAsar(args.source);
-const archive = path.join(args.app ?? '/usr/lib/t3code', 'resources/app.asar');
+const app = args.app ?? (process.platform === 'linux' ? '/usr/lib/t3code' : '/Applications/T3 Code (Beta).app');
+const archive = path.join(app, app.endsWith('.app') ? 'Contents/Resources/app.asar' : 'resources/app.asar');
 const metadata = JSON.parse(asar.extractFile(archive, 'package.json'));
 const revision = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: args.source, encoding: 'utf8' });
 if (revision.status !== 0 || !revision.stdout.trim().startsWith(metadata.t3codeCommitHash)) throw new Error('O worktree não está no commit exato da instalação.');

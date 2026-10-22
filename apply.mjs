@@ -103,13 +103,23 @@ async function main() {
     }
     console.log('Preparando cópia e recompacotando o app.asar...');
     run('/usr/bin/ditto', [options.app, candidate]);
+    const entitlements = path.join(temp, 'adhoc.entitlements');
+    const dumped = spawnSync('/usr/bin/codesign', ['-d', '--entitlements', '-', '--xml', candidate], { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 });
+    if (dumped.error) throw dumped.error;
+    if (dumped.status !== 0) throw new Error(`Não foi possível ler os entitlements: ${dumped.stderr}`);
+    await fs.writeFile(entitlements, dumped.stdout);
+    for (const key of ['com.apple.application-identifier', 'com.apple.developer.associated-domains', 'com.apple.developer.team-identifier', 'keychain-access-groups']) {
+      spawnSync('/usr/libexec/PlistBuddy', ['-c', `Delete :${key}`, entitlements]);
+    }
     const asar = await loadAsar(options.repo);
     const extracted = path.join(temp, 'extracted');
     const payload = path.join(temp, 'payload');
     await fs.mkdir(payload);
     run('/usr/bin/tar', ['-xzf', payloadArchive, '-C', payload]);
     const archive = path.join(candidate, 'Contents/Resources/app.asar');
-    const result = await repackArchive(asar, originalAsar, archive, extracted, payload, target);
+    const packed = path.join(temp, 'packed.asar');
+    const result = await repackArchive(asar, originalAsar, packed, extracted, payload, target);
+    await fs.rename(packed, archive);
     const plist = path.join(candidate, 'Contents/Info.plist');
     run('/usr/libexec/PlistBuddy', ['-c', `Set :ElectronAsarIntegrity:Resources/app.asar:hash ${result.headerHash}`, plist]);
     const backup = options.output ? null : path.join(kit, 'backups', new Date().toISOString().replaceAll(':', '-'), path.basename(options.app));
@@ -117,7 +127,9 @@ async function main() {
       patchId: target.patchId, originalAsarSha256: target.originalAsarSha256,
       patchedAsarSha256: result.archiveHash, backupPath: backup, appliedAt: new Date().toISOString(),
     }, null, 2) + '\n');
-    run('/usr/bin/codesign', ['--force', '--deep', '--sign', '-', '--preserve-metadata=entitlements,requirements,flags,runtime', candidate]);
+    const ticket = path.join(candidate, 'Contents/CodeResources');
+    if (await exists(ticket)) await fs.rm(ticket);
+    run('/usr/bin/codesign', ['--force', '--sign', '-', '--options', 'runtime', '--entitlements', entitlements, candidate]);
     run('/usr/bin/codesign', ['--verify', '--deep', '--strict', candidate]);
     if (options.output) {
       await fs.rename(candidate, options.output);

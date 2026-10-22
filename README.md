@@ -6,10 +6,10 @@ O mesmo `./apply.sh` detecta o sistema operacional e escolhe o perfil. Cada perf
 
 | Sistema | Instalação padrão | Versão / commit | Payload |
 | --- | --- | --- | --- |
-| macOS arm64 | `/Applications/T3 Code (Beta).app` | `0.1.0-disable-pr-creation.20261016` / `66c4f1b87b99` | `target.json`, `payload.tar.gz`: somente cliente web |
+| macOS arm64 | `/Applications/T3 Code (Beta).app` | `0.1.1` / `fe27e8e3dc12` | `target.json`, `payload.tar.gz`: cliente web e servidor |
 | Linux x64 | `/usr/lib/t3code` | `0.1.1` / `fe27e8e3dc12` | `linux/target.json`, `linux/payload.tar.gz`: cliente web e servidor |
 
-O perfil macOS original foi preservado. O perfil Linux foi compilado sobre o commit exato instalado, pois essa release oficial ainda não contém os contratos das duas preferências. O executável Electron e suas dependências nativas permanecem os da instalação.
+Os dois perfis 0.1.1 usam o mesmo delta de fonte, compilado sobre o commit exato instalado, porque a release oficial ainda não contém os contratos das duas preferências. Os payloads e fingerprints são independentes. O executável Electron e suas dependências nativas permanecem os da instalação. No macOS o bundle externo passa a ser ad hoc; helpers e nativos unpacked conservam a assinatura Developer ID.
 
 ## Aplicar
 
@@ -58,7 +58,7 @@ Não precisa fechar o aplicativo para preparar uma cópia:
 
 O destino precisa estar livre e fora da instalação de origem. `--output` não substitui a instalação nem cria backup para restauração; descarte essa cópia quando terminar. `--app` seleciona outra instalação do mesmo perfil, e `--repo` seleciona o checkout que fornece `@electron/asar` quando ele não está no kit. Nenhum desses parâmetros permite ignorar um hash incompatível.
 
-No Linux são conferidos também hashes, links e permissões dos arquivos externos ao ASAR, inclusive `chrome-sandbox` e dependências unpacked. O perfil atual mantém o Electron intacto e não exige assinatura Apple. No macOS o fluxo continua atualizando a integridade no `Info.plist` e verificando a assinatura ad hoc.
+No Linux são conferidos também hashes, links e permissões dos arquivos externos ao ASAR, inclusive `chrome-sandbox` e dependências unpacked. O perfil atual mantém o Electron intacto e não exige assinatura Apple. No macOS o fluxo atualiza a integridade no `Info.plist`, preserva nativos unpacked e helpers oficiais, e verifica a assinatura ad hoc do bundle externo.
 
 ## Próxima atualização oficial
 
@@ -72,13 +72,13 @@ O procedimento completo, inclusive reconstrução dos dois perfis, está em [AGE
 
 - `apply.sh`: detecção do sistema; `apply.mjs`: instalador macOS; `apply-linux.mjs`: instalador Linux.
 - `patch-lib.mjs`, `linux-lib.mjs`: empacotamento, validação, permissões e detecção de processos.
-- `target.json`, `payload.tar.gz`: perfil macOS original; `linux/`: perfil Linux independente.
+- `target.json`, `payload.tar.gz`: perfil macOS 0.1.1; `linux/`: perfil Linux independente.
 - `prepare-source.mjs`: worktree isolado com perfil `legacy`, `modern` ou `linux`.
-- `build-linux.mjs`: recupera os defaults públicos da release Linux e compila web/servidor sem imprimir seus valores.
-- `build-payload.mjs`: gera o perfil da plataforma selecionada pelo caminho de `--app`; não instala o aplicativo.
+- `build-linux.mjs`: recupera os defaults públicos do app informado (`.app` ou instalação Linux) e compila web/servidor sem imprimir seus valores.
+- `build-payload.mjs`: gera o perfil da plataforma selecionada pelo caminho de `--app`; aceita `--server-dist` também no macOS quando faltam contratos; não instala o aplicativo.
 - `patches/`, `reference/`, `reference-installed-version/`, `reference-linux/`: deltas e snapshots de proveniência, nunca substitutos integrais dos arquivos de releases futuras.
 - `manifest.json`, `checksums.sha256`: bases e checksums; `patch-lib.test.mjs`, `linux.test.mjs`: testes do kit.
 
-O patch cobre o cliente web servido pelo desktop e, no Linux atual, o servidor local desse desktop. Não atualiza `app.t3.codes`, outros servidores ou apps nativos iOS/Android. Os ajustes mobile de fonte foram preservados para integração, sem entregar um build mobile.
+O patch cobre o cliente web servido pelo desktop e, nas releases 0.1.1 atuais, o servidor local desse desktop. Não atualiza `app.t3.codes`, outros servidores ou apps nativos iOS/Android. Os ajustes mobile de fonte foram preservados para integração, sem entregar um build mobile.
 
 O kit não contém banco de dados, credenciais privadas ou cópia completa do aplicativo. Deriva do [T3 Code](https://github.com/pingdotgg/t3code), distribuído sob a [licença MIT](LICENSE). Backups e dependências ficam fora do versionamento.

@@ -15,11 +15,11 @@ for (let i = 2; i < process.argv.length; i += 2) {
   if (!['--web-dist', '--server-dist', '--app', '--repo'].includes(arg) || !process.argv[i + 1]) throw new Error(`Argumento inválido: ${arg}`);
   values[arg.slice(2)] = path.resolve(process.argv[i + 1]);
 }
-if (!values['web-dist']) throw new Error('Uso: node build-payload.mjs --web-dist /caminho/apps/web/dist [--app /caminho/T3.app] [--repo /caminho/t3code]');
+if (!values['web-dist']) throw new Error('Uso: node build-payload.mjs --web-dist /caminho/apps/web/dist [--server-dist /caminho/apps/server/dist] [--app /caminho/T3.app] [--repo /caminho/t3code]');
 const app = values.app ?? (process.platform === 'linux' ? '/usr/lib/t3code' : '/Applications/T3 Code (Beta).app');
 const linux = !app.endsWith('.app');
-if (linux && !values['server-dist']) throw new Error('O perfil Linux atual exige --server-dist da mesma release.');
-if (!linux && values['server-dist']) throw new Error('O perfil macOS validado aceita somente o cliente web.');
+const includeServer = Boolean(values['server-dist']);
+if (linux && !includeServer) throw new Error('O perfil Linux atual exige --server-dist da mesma release.');
 const repo = values.repo ?? path.resolve(kit, '../t3code');
 const asar = await loadAsar(repo);
 const archive = path.join(app, linux ? 'resources/app.asar' : 'Contents/Resources/app.asar');
@@ -27,7 +27,7 @@ const packageJson = JSON.parse(asar.extractFile(archive, 'package.json'));
 const prefix = 'apps/server/dist/client/';
 const bufferHash = (buffer) => createHash('sha256').update(buffer).digest('hex');
 const serverPattern = /^apps\/server\/dist\/[\w.-]+\.mjs$/;
-const originalFiles = asar.listPackage(archive).map((name) => name.replace(/^\//, '')).filter((name) => (name.startsWith(prefix) || (linux && serverPattern.test(name))) && !('files' in asar.statFile(archive, name)));
+const originalFiles = asar.listPackage(archive).map((name) => name.replace(/^\//, '')).filter((name) => (name.startsWith(prefix) || (includeServer && serverPattern.test(name))) && !('files' in asar.statFile(archive, name)));
 const newFiles = new Map();
 async function walk(directory, prefix = '') {
   for (const entry of await fs.readdir(directory, { withFileTypes: true })) {
@@ -43,7 +43,7 @@ for (const name of ['favicon.ico', 'favicon-16x16.png', 'favicon-32x32.png', 'ap
   if (originalFiles.includes(prefix + name)) newFiles.set(name, asar.extractFile(archive, prefix + name));
 }
 const distribution = new Map([...newFiles].map(([name, content]) => [prefix + name, content]));
-if (linux) {
+if (includeServer) {
   for (const entry of await fs.readdir(values['server-dist'], { withFileTypes: true })) {
     if (!entry.isFile() || !entry.name.endsWith('.mjs')) continue;
     const name = `apps/server/dist/${entry.name}`;
@@ -76,7 +76,8 @@ try {
     patchId: `changes-and-pr-creation-${originalAsarSha256.slice(0, 12)}-${payloadSha256.slice(0, 12)}`,
     version: packageJson.version, originalSourceCommit: packageJson.t3codeCommitHash,
     arch: process.arch, originalAsarSha256,
-    ...(linux ? { platform: 'linux', originalFiles: await installationFiles(app), serverFiles: [...new Set([...distribution.keys(), ...removedFiles].filter(name => serverPattern.test(name)))].sort() } : { originalPlistSha256: await hashFile(path.join(app, 'Contents/Info.plist')) }),
+    ...(linux ? { platform: 'linux', originalFiles: await installationFiles(app) } : { originalPlistSha256: await hashFile(path.join(app, 'Contents/Info.plist')) }),
+    ...(includeServer ? { serverFiles: [...new Set([...distribution.keys(), ...removedFiles].filter((name) => serverPattern.test(name)))].sort() } : {}),
     payloadSha256, changedFiles, removedFiles,
   };
   await fs.writeFile(path.join(outputDir, 'target.json'), JSON.stringify(target, null, 2) + '\n');

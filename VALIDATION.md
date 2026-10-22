@@ -1,5 +1,44 @@
 # Validações — macOS e Linux
 
+## Port e validação macOS 0.1.1 — 22/10/2026
+
+**O kit macOS foi adaptado à release oficial `0.1.1`. A aplicação real foi recusada porque o T3 Code hospedeiro estava aberto. A instalação em `/Applications/T3 Code (Beta).app` continua original; o novo payload está pronto para o Terminal externo após fechar o app.**
+
+### Alvo e fontes
+
+- macOS arm64, `/Applications/T3 Code (Beta).app`, `CFBundleShortVersionString`/`buildVersion` `0.1.1`, commit `fe27e8e3dc12`, resolvido como `fe27e8e3dc12dcbb108e9a28fd9b8cb65f34ae92`. Mesmo commit da release Linux 0.1.1; ASAR e plist diferentes.
+- ASAR original SHA-256: `efaff4124b52c71cf41e78ff65df41c6829a330e3626939a8c0ca63f30fc5dfc`. Info.plist SHA-256: `acbb780729735bb49703fb88241f8b2454574a101b2216bf7b4e0b275e43e1ab`.
+- App original: Developer ID `T3 Tools, Inc. (ARK85ZXQ4Z)`, notarizado, com `ElectronAsarIntegrity` no plist. Sem marcador de patch.
+- Inspeção do ASAR original: não há `changesScope` nem `pullRequestCreationEnabled` no cliente nem nos 12 chunks `.mjs` do servidor. Foi necessário reconstruir também o servidor.
+- Fontes no worktree `/Users/belizario/dev/t3code-patch-build-macos-0.1.1`, perfil `linux`, `patches/linux-customizations.patch` sem conflitos. Os 30 snapshots `reference-linux/` coincidiram. Payload macOS antigo preservado em `backups/kit-macos-payload-0.1.0-20261022.tar.gz`. Perfil Linux (`linux/target.json` / `linux/payload.tar.gz`) não foi alterado.
+
+### Testes e compilação
+
+- Node portátil `v24.22.1` em `/tmp`, sem alteração do Node 20 do Homebrew. Dependências da release com `pnpm@11.10.0` e lockfile congelado.
+- Typecheck web e servidor passaram, com sugestões Effect em código upstream. **464 testes de fonte passaram em 12 arquivos**: 440 testes em 10 arquivos de lógica/contratos/runtime/configurações/servidor/dependências externas, 20 testes de ações Git mobile e 4 testes React mobile. **Não foi executado o teste browser em Chromium** nesta sessão. Não foram rodados checks do monorepo inteiro.
+- Defaults públicos de Clerk, JWT, OAuth e relay recuperados deste ASAR oficial, conferidos por comprimento e igualdade com o original, sem registrar valores. Não estavam em branco. Nenhum `.env` no worktree.
+- Web e servidor compilados da mesma release, versão `0.1.1`. Contratos presentes em `binCli-BH4DTPlu.mjs` e em 3 chunks do cliente.
+
+### Payload, assinatura e cópia
+
+- `payload.tar.gz`: **11.100.653 bytes**, SHA-256 `4337a5fc8c1b5f1759c7003e551295996b3200d136b1e792665bacadc8b5c6bc`.
+- **759 arquivos novos/alterados**: 757 web e 2 chunks de servidor (`bin.mjs`, `binCli-BH4DTPlu.mjs`). **259 remoções**: 258 web e 1 chunk antigo (`binCli-DF59J6P3.mjs`). `serverFiles` listado no `target.json` macOS.
+- `apply.mjs` empacota o ASAR fora do `.app` para não reescrever nativos assinados; assina só o bundle externo como ad hoc, com entitlements irrestritos (JIT, memória, library validation, câmera, microfone) e sem ticket notarizado. `--deep` com `requirements` da equipe T3 Tools falha neste alvo oficial.
+- **5 testes do kit passaram** (2 de integração Linux pulados). `./apply.sh --check` reconheceu a instalação real como compatível, sem modificá-la.
+- `--output '/tmp/T3 Code (Patch Rebuild Test).app'`: `codesign --verify --deep --strict` passou; helpers continuam Developer ID; CLI da cópia e da original responderam `t3 v0.1.1`. Integridade ASAR no plist `6effff5c925b720f050bd7c6ddfa0f8f21256e6b6750c84503d5943484e5871d`.
+- Comparação do ASAR: **1.426 arquivos originais idênticos**, **95 unpacked idênticos**, **759 arquivos do payload conferidos por SHA-256**. Contratos presentes no ASAR patched.
+- Numa segunda cópia isolada: aplicar → repetir sem novo backup → restaurar. ASAR e plist voltaram aos hashes originais; o marcador saiu. ASAR adulterado foi recusado.
+- `./apply.sh` na instalação real encerrou com exit code 1 e pediu para fechar o T3 Code, antes de copiar/trocar. O SHA-256 real permaneceu o original.
+
+Para concluir a instalação real, fechar o T3 Code e executar em Terminal externo:
+
+```sh
+cd /Users/belizario/dev/t3code-patch-kit
+./apply.sh
+```
+
+O script criará um backup em `backups/` antes da troca. Mantenha esse backup até confirmar o funcionamento. Após o patch, o bundle externo fica ad hoc: Touch ID, passkeys e grupos de keychain com Team ID da Apple deixam de valer; commit, push e PRs existentes continuam disponíveis na interface. Não houve abertura da UI real nem alteração de dados de usuário.
+
 ## Port e validação Linux 0.1.1 — 22/10/2026
 
 **O kit foi corrigido para a versão nova. A aplicação real foi tentada, mas o instalador recusou a troca porque o T3 Code hospedeiro estava aberto (PID `803980`). A instalação em uso continua original; o novo payload está pronto para aplicação pelo Terminal externo após fechar o app.**

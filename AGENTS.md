@@ -22,13 +22,13 @@ Isto controla ações de criação da interface. Não promete impedir ferramenta
 
 ## Perfis e proveniência
 
-- **macOS arm64**: `/Applications/T3 Code (Beta).app`, versão `0.1.0-disable-pr-creation.20261016`, commit `66c4f1b87b99`. `target.json` e `payload.tar.gz` na raiz são o perfil original, preservado. O servidor instalado já contém os contratos; o payload altera somente `apps/server/dist/client/`.
-- **Linux x64**: `/usr/lib/t3code/t3code`, pacote Arch `t3code-bin 0.1.1-1`, versão ASAR `0.1.1`, commit exato `fe27e8e3dc12dcbb108e9a28fd9b8cb65f34ae92`. `linux/target.json` e `linux/payload.tar.gz` são independentes. A release não tinha os contratos; o payload inclui cliente e os chunks `.mjs` necessários do servidor da mesma release. Electron, pacote raiz, IPC desktop, dependências e binários nativos são preservados.
+- **macOS arm64**: `/Applications/T3 Code (Beta).app`, versão `0.1.1`, commit `fe27e8e3dc12`, resolvido como `fe27e8e3dc12dcbb108e9a28fd9b8cb65f34ae92`. `target.json` e `payload.tar.gz` na raiz são este perfil. A release oficial não tinha os contratos; o payload inclui o cliente web e os chunks `.mjs` listados em `serverFiles`. O app original é Developer ID + notarizado; o instalador reempacota só o ASAR, preserva nativos unpacked e helpers oficiais, e reassina apenas o bundle externo.
+- **Linux x64**: `/usr/lib/t3code/t3code`, pacote Arch `t3code-bin 0.1.1-1`, versão ASAR `0.1.1`, commit exato `fe27e8e3dc12dcbb108e9a28fd9b8cb65f34ae92`. `linux/target.json` e `linux/payload.tar.gz` são independentes. A mesma fonte `linux-customizations.patch` serve aos dois 0.1.1; os payloads não são intercambiáveis porque arch, defaults públicos e fingerprints do ASAR diferem. Electron, pacote raiz, IPC desktop, dependências e binários nativos são preservados.
 - `manifest.json` registra a base upstream moderna `2fae0f9841448e6edb93d0ebe4cbaf2d546bb38c` e a integração final do fork `7fb09a2af59d1e33d3535d29315cc392d97132e6`, merge seguido da adaptação ao React Compiler.
 - `patches/customizations.patch` contém somente as duas funcionalidades em relação à base moderna, sem as centenas de mudanças upstream do merge.
 - O perfil `legacy` aplica `legacy-changes.patch` sobre `3b99fb2d2` e `legacy-pr-creation.patch` sobre `66c4f1b87`. O segundo contém a criação de PRs, suas três correções posteriores e a importação do default de Changes necessária à base antiga. O preparador pula Changes quando o commit já o contém.
 - O perfil `linux` aplica `patches/linux-customizations.patch` sobre `fe27e8e3dc12`, com adaptação dos conflitos à release oficial, preservação da abertura explícita em `ChatView` e automática em `useProactivePanels`, do shell de thread silencioso e do estado de carregamento do diff. O controle novo mantém os tokens visuais de diff da release e é compatível com o React Compiler. Inclui teste de persistência/broadcast no servidor e 32 testes do controle Git em Chromium headless. O perfil Linux tem prioridade por ancestralidade antes de modern; a release Linux atual também descende da base modern.
-- `reference-installed-version/`: fontes do payload macOS. `reference/`: integração moderna. `reference-linux/`: fontes do payload Linux. Use como referência para conflitos; **não substitua arquivos inteiros de uma release futura**, pois isso reverteria atualizações oficiais.
+- `reference-linux/`: snapshots da fonte 0.1.1 (`fe27e8e3dc12`), usados no macOS atual e no Linux. `reference-installed-version/`: proveniência do payload macOS antigo `0.1.0-disable-pr-creation.20261016`. `reference/`: integração moderna. Use como referência para conflitos; **não substitua arquivos inteiros de uma release futura**, pois isso reverteria atualizações oficiais.
 
 ## Aplicação pronta
 
@@ -50,11 +50,11 @@ sudo env "PATH=$PATH" ./apply.sh --restore
 
 O fluxo é: conferir fingerprints → copiar a instalação → extrair/reempacotar preservando unpacked → verificar a cópia → criar backup completo → conferir novamente a origem/processos → trocar diretório com rollback. O marcador liga o hash do ASAR alterado ao patch e ao backup; uma atualização que trocar o ASAR invalida esse reconhecimento. Preserve backups até a pessoa confirmar o funcionamento.
 
-No **macOS**, `apply.mjs` atualiza a integridade ASAR no plist, assina ad hoc e verifica a assinatura. Com Node anterior a 24, relança pelo Node do Electron com `ELECTRON_RUN_AS_NODE=1` e `ELECTRON_NO_ASAR=1`; o segundo evita interceptação da leitura binária do ASAR. O alvo original já era ad hoc. Uma assinatura ad hoc não reproduz privilégios Apple: reavalie entitlements, keychain e passkeys se o próximo alvo for oficialmente assinado.
+No **macOS**, `apply.mjs` atualiza a integridade ASAR no plist, empacota o ASAR novo ao lado da cópia para não reescrever `app.asar.unpacked`, remove o ticket notarizado em `Contents/CodeResources` e assina só o bundle externo como ad hoc. Entitlements restritos (`application-identifier`, `team-identifier`, `associated-domains`, `keychain-access-groups`) são retirados; sem isso o AMFI mata o processo ad hoc. Helpers, frameworks e nativos unpacked permanecem com a assinatura Developer ID original. `--deep` com `requirements` preservados reassinaria esses binários como ad hoc e falharia o requisito da equipe T3 Tools. Com Node anterior a 24, relança pelo Node do Electron com `ELECTRON_RUN_AS_NODE=1` e `ELECTRON_NO_ASAR=1`; o segundo evita interceptação da leitura binária do ASAR. Uma assinatura ad hoc não reproduz privilégios Apple: Touch ID, passkeys e keychain com prefixo de Team ID deixam de valer no bundle externo.
 
 No **Linux**, `apply-linux.mjs` confere também todos os arquivos externos ao ASAR, links e modos com `linux-lib.mjs`. `cp -a` preserva metadados; cópias sem privilégios precisam repor o modo setuid de `chrome-sandbox`, que o cp pode limpar ao trocar seu proprietário. A aplicação em `/usr/lib` deve rodar como root para manter também a propriedade. Cópias de teste pertencem ao usuário que as criou. A detecção de processos lê `/proc/PID/exe`, sem sinais, e um lock ao lado da instalação serializa aplicação/restauração. Não remova um lock sem investigar uma execução interrompida. O Electron Linux atual tem `EnableEmbeddedAsarIntegrityValidation` desabilitado na origem; não alteramos fuses nem o executável. Se isso mudar numa release, adapte a verificação/empacotamento; não desabilite integridade para contorná-la.
 
-O validador de payload permite cliente web e, **somente quando explicitamente listados em `serverFiles` no target**, chunks `apps/server/dist/NOME.mjs` no nível imediato. O macOS atual não tem essa permissão extra. Não libere toda a árvore de servidor ou `node_modules`.
+O validador de payload permite cliente web e, **somente quando explicitamente listados em `serverFiles` no target**, chunks `apps/server/dist/NOME.mjs` no nível imediato. O macOS 0.1.1 e o Linux 0.1.1 usam essa lista porque a release oficial ainda não contém os contratos. Não libere toda a árvore de servidor ou `node_modules`.
 
 ## Reconstruir o Linux atual
 
@@ -97,32 +97,28 @@ T3CODE_LINUX_INTEGRATION_APP=/usr/lib/t3code node --test linux.test.mjs
 
 `build-payload.mjs` grava **somente `linux/`** nesse fluxo, inclui arquivos novos/diferentes e registra remoções de chunks antigos. Preserva favicons/manifest da instalação. Mapas de fonte do servidor não entram no payload. Confira dependências externas/nativas antes de combinar bundles: no alvo atual os 100 especificadores externos originais/reconstruídos são iguais e os arquivos nativos originais foram preservados.
 
-## Reconstruir o macOS original
+## Reconstruir o macOS atual
 
-Execute no Mac, preservando os defaults públicos **em branco somente neste alvo**, conforme os bundles originais de `cloud/publicConfig`. Não copie `.env` do checkout principal.
+Execute no Mac. Recupere os defaults públicos **deste** ASAR oficial (não estão em branco). Não copie `.env` do checkout principal nem reutilize valores do payload macOS antigo.
 
 ```sh
-node prepare-source.mjs --output /tmp/t3code-patch-build
+node prepare-source.mjs --app '/Applications/T3 Code (Beta).app' --output /Users/belizario/dev/t3code-patch-build-macos-0.1.1
 ```
 
-No worktree, instale as dependências exatas e rode typecheck web. No perfil macOS antigo, os testes do controle Git ainda são `GitActionsControl.lifecycle.test.ts`, `GitActionsControl.logic.test.ts` e `GitActionsControl.test.ts`; não use o teste browser da release Linux como substituto. Rode também os testes focados de contratos, runtime e diffPanelStore presentes nessa release. Depois:
+O preparador escolhe o perfil `linux` neste commit. Instale as dependências exatas e rode os typechecks e testes focados listados na reconstrução Linux, inclusive servidor. Não use os testes `GitActionsControl.lifecycle.test.ts` da base macOS antiga. O teste browser em Chromium só com autorização explícita.
 
 ```sh
-APP_VERSION=0.1.0-disable-pr-creation.20261016 T3CODE_WEB_SOURCEMAP=0 \
-  ./node_modules/.bin/vp run --filter @t3tools/web build
-```
-
-De volta ao kit:
-
-```sh
+node build-linux.mjs --source /Users/belizario/dev/t3code-patch-build-macos-0.1.1 \
+  --app '/Applications/T3 Code (Beta).app'
 node build-payload.mjs --app '/Applications/T3 Code (Beta).app' \
-  --web-dist /tmp/t3code-patch-build/apps/web/dist
+  --web-dist /Users/belizario/dev/t3code-patch-build-macos-0.1.1/apps/web/dist \
+  --server-dist /Users/belizario/dev/t3code-patch-build-macos-0.1.1/apps/server/dist
 node --test patch-lib.test.mjs linux.test.mjs
 ./apply.sh --check
 ./apply.sh --output '/tmp/T3 Code (Patch Rebuild Test).app'
 ```
 
-Esse fluxo grava `target.json`/`payload.tar.gz` na raiz e não altera `linux/`. Guarde uma cópia do kit antes de regenerar qualquer payload. A versão Linux anterior deste kit foi preservada em `backups/kit-before-linux-0.1.1-20261022.tar.gz`; não use os backups do aplicativo 0.1.0 para restaurar por cima da release 0.1.1.
+`build-linux.mjs` aceita um `.app` e lê `Contents/Resources/app.asar`. `build-payload.mjs` grava **somente a raiz** nesse fluxo quando `--app` termina em `.app`; com `--server-dist` preenche `serverFiles` também no target macOS. Não altera `linux/`. Guarde uma cópia do payload anterior antes de regenerar: o macOS `0.1.0-disable-pr-creation.20261016` está em `backups/kit-macos-payload-0.1.0-20261022.tar.gz`. A versão Linux anterior do kit permanece em `backups/kit-before-linux-0.1.1-20261022.tar.gz`; não use backups do aplicativo 0.1.0 para restaurar por cima da 0.1.1.
 
 ## Adaptar depois de uma atualização oficial
 
@@ -151,7 +147,7 @@ ELECTRON_RUN_AS_NODE=1 T3CODE_HOME=/tmp/t3code-patch-cli-state \
   '/tmp/T3 Code (Patch Rebuild Test).app/Contents/Resources/app.asar/apps/server/dist/bin.mjs' --version
 ```
 
-A CLI Linux atual deve responder `t3 v0.1.1`; compare sempre com a CLI original em vez de fixar a versão anterior no teste.
+A CLI Linux e a CLI macOS atuais devem responder `t3 v0.1.1`; compare sempre com a CLI original em vez de fixar a versão anterior no teste. Um binário ad hoc com entitlements de Team ID é encerrado pelo AMFI; confira a CLI só depois da assinatura com entitlements irrestritos.
 
 **Não use `ELECTRON_NO_ASAR=1` nessas chamadas CLI**, pois o entrypoint está dentro do ASAR.
 
@@ -159,4 +155,4 @@ A CLI Linux atual deve responder `t3 v0.1.1`; compare sempre com a CLI original 
 
 Fontes incluem contratos, runtime compartilhado, web e ajustes mobile de integração. Os payloads cobrem desktop e o cliente web servido por ele; não atualizam `app.t3.codes`, outro servidor remoto ou apps nativos iOS/Android. Não há mudanças específicas de provider nem novos métodos MCP.
 
-Registre em VALIDATION.md o alvo, os testes realmente executados e as limitações. Diferencie validação atual Linux de evidência histórica macOS; não alegue codesign ou execução macOS realizados em Linux. Informe claramente se preparou cópias ou instalou. Mantenha o backup até a pessoa confirmar que a instalação está funcionando. Para o app em uso, entregue o comando de Terminal externo e não termine o processo que hospeda o agente.
+Registre em VALIDATION.md o alvo, os testes realmente executados e as limitações. Diferencie a validação macOS 0.1.1 feita neste Mac da validação Linux e da evidência histórica do payload macOS 0.1.0; não alegue codesign ou execução macOS realizados em Linux. Informe claramente se preparou cópias ou instalou. Mantenha o backup até a pessoa confirmar que a instalação está funcionando. Para o app em uso, entregue o comando de Terminal externo e não termine o processo que hospeda o agente.
